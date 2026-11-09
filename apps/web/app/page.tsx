@@ -1,0 +1,359 @@
+'use client';
+
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+
+type User = { id: string; displayName: string; email: string };
+type Member = { userId: string; user: User };
+type Group = { id: string; name: string; currency: string; members: Member[]; _count?: { expenses: number } };
+type Expense = {
+  id: string;
+  description: string;
+  amountMinor: number;
+  occurredAt: string;
+  payers: { user: User; amountMinor: number }[];
+  splits: { user: User; amountMinor: number }[];
+};
+type Balance = { user: User; netAmountMinor: number };
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/v1';
+const money = (minor: number) =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(minor / 100);
+
+export default function Home() {
+  const [token, setToken] = useState('');
+  const [me, setMe] = useState<User | null>(null);
+  const [mode, setMode] = useState<'login' | 'signup'>('signup');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [groups, setGroups] = useState<Group[]>([]);
+  // An empty selected group means the user is on the groups overview.
+  const [selected, setSelected] = useState('');
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [balances, setBalances] = useState<Balance[]>([]);
+  const [groupName, setGroupName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [description, setDescription] = useState('');
+  const [amount, setAmount] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const request = useCallback(async (path: string, options: RequestInit = {}) => {
+    const response = await fetch(`${API}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || 'Something went wrong');
+    return data;
+  }, [token]);
+
+  const refreshGroups = useCallback(async () => {
+    const data = await request('/groups');
+    setGroups(data);
+  }, [request]);
+
+  const refreshSelected = useCallback(async (id: string) => {
+    if (!id) return;
+    const [expenseData, balanceData] = await Promise.all([
+      request(`/groups/${id}/expenses`),
+      request(`/groups/${id}/balances`),
+    ]);
+    setExpenses(expenseData);
+    setBalances(balanceData);
+  }, [request]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem('together-token');
+    if (saved) setToken(saved);
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    request('/users/me')
+      .then((user) => {
+        setMe(user);
+        return refreshGroups();
+      })
+      .catch(() => {
+        setToken('');
+        setMe(null);
+        window.localStorage.removeItem('together-token');
+      });
+  }, [token, request, refreshGroups]);
+
+  useEffect(() => {
+    if (!selected || !token) {
+      setExpenses([]);
+      setBalances([]);
+      return;
+    }
+    refreshSelected(selected).catch((e) => setError(e.message));
+  }, [selected, token, refreshSelected]);
+
+  async function submitAuth(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const result = await request(`/auth/${mode}`, {
+        method: 'POST',
+        body: JSON.stringify({ name, email, password }),
+      });
+      window.localStorage.setItem('together-token', result.token);
+      setToken(result.token);
+      setMe(result.user);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createGroup(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    try {
+      await request('/groups', {
+        method: 'POST',
+        body: JSON.stringify({ name: groupName, currency: 'INR' }),
+      });
+      setGroupName('');
+      await refreshGroups();
+      // Stay on the overview so the new group appears in the group list.
+      setSelected('');
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function addMember(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    setError('');
+    try {
+      await request(`/groups/${selected}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ email: inviteEmail }),
+      });
+      setInviteEmail('');
+      await refreshGroups();
+      await refreshSelected(selected);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function addExpense(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    const rupees = Number(amount);
+    if (!Number.isFinite(rupees) || rupees <= 0) {
+      setError('Enter a valid amount.');
+      return;
+    }
+    setError('');
+    try {
+      await request(`/groups/${selected}/expenses`, {
+        method: 'POST',
+        body: JSON.stringify({
+          description,
+          amountMinor: Math.round(rupees * 100),
+          payerIds: [me?.id],
+          splitUserIds: groups.find((g) => g.id === selected)?.members.map((m) => m.userId),
+          splitMethod: 'EQUAL',
+        }),
+      });
+      setDescription('');
+      setAmount('');
+      await refreshSelected(selected);
+      await refreshGroups();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function logout() {
+    window.localStorage.removeItem('together-token');
+    setToken('');
+    setMe(null);
+    setGroups([]);
+    setSelected('');
+  }
+
+  const current = useMemo(() => groups.find((g) => g.id === selected), [groups, selected]);
+  const myNet = balances.find((b) => b.user.id === me?.id)?.netAmountMinor || 0;
+  const totalOwed = Math.max(myNet, 0);
+  const totalOwe = Math.max(-myNet, 0);
+
+  if (!token || !me) {
+    return (
+      <main className="auth-shell">
+        <div className="auth-card">
+          <div className="brand"><span className="brand-mark">t</span><span>Together</span></div>
+          <p className="eyebrow">SHARED EXPENSES, MADE SIMPLE</p>
+          <h1>{mode === 'signup' ? 'Create your account' : 'Welcome back'}</h1>
+          <p className="muted">Track shared spending with the people in your life.</p>
+          <form onSubmit={submitAuth} className="stack">
+            {mode === 'signup' && (
+              <label>Your name<input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} placeholder="e.g. Aditi Sharma" /></label>
+            )}
+            <label>Email address<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" /></label>
+            <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} placeholder="At least 8 characters" /></label>
+            {error && <p className="error">{error}</p>}
+            <button className="primary full" disabled={busy}>{busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Log in'}</button>
+          </form>
+          <p className="switch">
+            {mode === 'signup' ? 'Already have an account?' : 'New to Together?'}{' '}
+            <button className="link-button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setError(''); }}>
+              {mode === 'signup' ? 'Log in' : 'Create an account'}
+            </button>
+          </p>
+          <small className="muted">Milestone 1 development build</small>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="shell">
+      <aside className="sidebar">
+        <div className="brand"><span className="brand-mark">t</span><span>Together</span></div>
+        <nav>
+          <button className={!selected ? 'active' : ''} onClick={() => setSelected('')}>▦ <span>All groups</span></button>
+          <button className={selected ? 'active' : ''} onClick={() => selected ? setSelected(selected) : undefined} disabled={!selected}>◉ <span>Current group</span></button>
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="avatar">{me.displayName.slice(0, 1).toUpperCase()}</div>
+          <div className="profile"><strong>{me.displayName}</strong><small>{me.email}</small></div>
+          <button className="icon-button" onClick={logout} title="Log out">↪</button>
+        </div>
+      </aside>
+
+      <section className="main">
+        {error && <div className="error-banner">{error}<button onClick={() => setError('')}>×</button></div>}
+
+        {!selected ? (
+          <>
+            <header className="groups-header">
+              <div>
+                <p className="eyebrow">YOUR TOGETHER SPACE</p>
+                <h1>Your groups</h1>
+                <p className="muted">Choose a group to see its expenses, balances and members.</p>
+              </div>
+              <div className="header-user"><span className="avatar">{me.displayName.slice(0, 1).toUpperCase()}</span><span>Hi, {me.displayName.split(' ')[0]}</span></div>
+            </header>
+
+            <section className="group-overview-top">
+              <div><span className="eyebrow">YOUR CIRCLES</span><h2>All groups <span className="count-pill">{groups.length}</span></h2></div>
+              <p className="muted">Your shared spaces, all in one place.</p>
+            </section>
+
+            {groups.length ? (
+              <div className="group-card-grid">
+                {groups.map((g, i) => (
+                  <button key={g.id} className="group-card" onClick={() => { setError(''); setSelected(g.id); }}>
+                    <div className={`group-card-icon tone-${i % 3}`}>{['⌂', '✈', '☻'][i % 3]}</div>
+                    <div className="group-card-main">
+                      <div className="group-card-title"><h3>{g.name}</h3><span className="card-arrow">↗</span></div>
+                      <p>{g.members.length} {g.members.length === 1 ? 'member' : 'members'} <span>·</span> {g._count?.expenses || 0} expenses</p>
+                    </div>
+                    <div className="group-card-footer"><span>{g.currency || 'INR'} group</span><strong>View group <span>→</span></strong></div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-groups"><div className="empty-illustration">⌂</div><h3>Your first group starts here</h3><p>Create a group for your flat, a trip, dinners or anything you share.</p></div>
+            )}
+
+            <section className="create-group-panel">
+              <div className="create-copy"><span className="create-plus">＋</span><div><h3>Create a group</h3><p className="muted">Start sharing expenses with friends, family or flatmates.</p></div></div>
+              <form className="create-group-form" onSubmit={createGroup}>
+                <input aria-label="New group name" value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="e.g. Bangalore Flat" required />
+                <button className="primary">Create group <span>→</span></button>
+              </form>
+            </section>
+          </>
+        ) : (
+          <>
+            <button className="back-link" onClick={() => { setSelected(''); setError(''); }}>← <span>All groups</span></button>
+            <header className="detail-header">
+              <div>
+                <p className="eyebrow">GROUP WORKSPACE</p>
+                <h1>{current?.name || 'Group details'}</h1>
+                <p className="muted">Shared expenses and balances for this group.</p>
+              </div>
+              <span className="group-member-count">{current?.members.length || 0} members</span>
+            </header>
+
+            <section className="group-balance-hero">
+              <div><span className="hero-label">YOUR NET BALANCE</span><strong>{money(myNet)}</strong><p>{myNet > 0 ? 'You are owed money in this group' : myNet < 0 ? 'You owe money in this group' : 'You are all settled up in this group'}</p></div>
+              <div className="hero-breakdown"><div><span>You are owed</span><strong className="hero-positive">{money(totalOwed)}</strong></div><div><span>You owe</span><strong>{money(totalOwe)}</strong></div></div>
+            </section>
+
+            <div className="detail-columns">
+              <div className="detail-primary-column">
+                <section className="panel detail-panel">
+                  <div className="panel-heading"><div><h2>Recent expenses</h2><p className="muted">Everything recorded in this group.</p></div><span className="count-pill">{expenses.length}</span></div>
+                  {expenses.length ? expenses.map((expense) => (
+                    <div className="detail-expense-row" key={expense.id}>
+                      <div className="expense-symbol">₹</div>
+                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small></div>
+                      <strong className="detail-expense-amount">{money(expense.amountMinor)}</strong>
+                    </div>
+                  )) : <div className="empty-state"><strong>No expenses yet</strong><p>Add the first expense for this group below.</p></div>}
+                </section>
+
+                <section className="panel detail-panel" id="add-expense">
+                  <div className="panel-heading"><div><h2>Add an expense</h2><p className="muted">Paid by you and split equally among group members.</p></div><span className="add-expense-symbol">＋</span></div>
+                  <form className="expense-form" onSubmit={addExpense}>
+                    <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What was it for? e.g. Groceries" required />
+                    <div className="amount-input"><span>₹</span><input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required /></div>
+                    <button className="primary" disabled={!current}>Save expense</button>
+                  </form>
+                </section>
+              </div>
+
+              <aside className="detail-side-column">
+                <section className="panel detail-panel">
+                  <div className="panel-heading"><div><h2>Members</h2><p className="muted">People in this group.</p></div></div>
+                  <form className="invite-form" onSubmit={addMember}>
+                    <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="friend@example.com" required />
+                    <button className="secondary">＋ Add</button>
+                  </form>
+                  <div className="member-list detail-member-list">
+                    {current?.members.map((member) => (
+                      <div className="member" key={member.userId}>
+                        <span className="avatar small-avatar">{member.user.displayName.slice(0, 1).toUpperCase()}</span>
+                        <span>{member.user.displayName}</span>
+                        {member.userId === me.id && <small>You</small>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="panel detail-panel">
+                  <div className="panel-heading"><div><h2>Group balances</h2><p className="muted">Net amount for each member.</p></div></div>
+                  {balances.length ? balances.map((balance) => (
+                    <div className="balance-person" key={balance.user.id}>
+                      <span>{balance.user.displayName}{balance.user.id === me.id ? ' (you)' : ''}</span>
+                      <strong className={balance.netAmountMinor > 0 ? 'green' : balance.netAmountMinor < 0 ? 'red' : ''}>
+                        {balance.netAmountMinor === 0 ? 'Settled' : balance.netAmountMinor > 0 ? `Owed ${money(balance.netAmountMinor)}` : `Owes ${money(-balance.netAmountMinor)}`}
+                      </strong>
+                    </div>
+                  )) : <p className="muted balance-empty">No balances to show yet.</p>}
+                </section>
+              </aside>
+            </div>
+          </>
+        )}
+
+        <footer>TOGETHER · SHARED EXPENSES, MADE SIMPLE</footer>
+      </section>
+    </main>
+  );
+}
