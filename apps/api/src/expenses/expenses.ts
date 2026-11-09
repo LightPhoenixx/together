@@ -28,6 +28,15 @@ class ExpensesService {
     if (splits.some((s: any) => !splitIds.includes(s.userId) || !Number.isSafeInteger(s.amountMinor) || s.amountMinor < 0)) throw new BadRequestException('Invalid split values.');
     const payerAmounts = splitEqually(amountMinor, payerIds);
     const created = await this.db.expense.create({ data: { groupId, createdById: userId, description, notes: body.notes || null, amountMinor: BigInt(amountMinor), currency: group.currency, splitMethod: body.splitMethod === 'EXACT' ? 'EXACT' : 'EQUAL', occurredAt: body.occurredAt ? new Date(body.occurredAt) : new Date(), payers: { create: payerAmounts.map(p => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor) })) }, splits: { create: splits.map((s: any) => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor) })) } }, include: { payers: { include: { user: { select: { id: true, displayName: true } } } }, splits: { include: { user: { select: { id: true, displayName: true } } } } } });
+    await this.db.auditEvent.create({
+      data: {
+        actorId: userId,
+        entityType: 'GROUP',
+        entityId: groupId,
+        action: 'EXPENSE_CREATED',
+        afterData: { expenseId: created.id, description: created.description, amountMinor, currency: created.currency },
+      },
+    });
     return { ...created, amountMinor: Number(created.amountMinor), payers: created.payers.map(p => ({ ...p, amountMinor: Number(p.amountMinor) })), splits: created.splits.map(s => ({ ...s, amountMinor: Number(s.amountMinor) })) };
   }
   async list(userId: string, groupId: string) {
