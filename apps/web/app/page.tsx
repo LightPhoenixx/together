@@ -14,6 +14,13 @@ type Expense = {
   splits: { user: User; amountMinor: number }[];
 };
 type Balance = { user: User; netAmountMinor: number };
+type ActivityEvent = {
+  id: string;
+  action: string;
+  createdAt: string;
+  actor: { id: string; displayName: string };
+  afterData?: Record<string, unknown> | null;
+};
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/v1';
 const money = (minor: number) =>
@@ -31,6 +38,7 @@ export default function Home() {
   const [selected, setSelected] = useState('');
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [groupName, setGroupName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [description, setDescription] = useState('');
@@ -59,12 +67,14 @@ export default function Home() {
 
   const refreshSelected = useCallback(async (id: string) => {
     if (!id) return;
-    const [expenseData, balanceData] = await Promise.all([
+    const [expenseData, balanceData, activityData] = await Promise.all([
       request(`/groups/${id}/expenses`),
       request(`/groups/${id}/balances`),
+      request(`/groups/${id}/activity`),
     ]);
     setExpenses(expenseData);
     setBalances(balanceData);
+    setActivity(activityData);
   }, [request]);
 
   useEffect(() => {
@@ -90,6 +100,7 @@ export default function Home() {
     if (!selected || !token) {
       setExpenses([]);
       setBalances([]);
+      setActivity([]);
       return;
     }
     refreshSelected(selected).catch((e) => setError(e.message));
@@ -189,6 +200,16 @@ export default function Home() {
   const myNet = balances.find((b) => b.user.id === me?.id)?.netAmountMinor || 0;
   const totalOwed = Math.max(myNet, 0);
   const totalOwe = Math.max(-myNet, 0);
+  const activityDescription = (event: ActivityEvent) => {
+    const details = event.afterData || {};
+    if (event.action === 'GROUP_CREATED') return 'created this group';
+    if (event.action === 'MEMBER_ADDED') return `added ${String(details.displayName || 'a member')} to the group`;
+    if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0))})`;
+    return event.action.toLowerCase().replaceAll('_', ' ');
+  };
+  const dateTime = (value: string) => new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  }).format(new Date(value));
 
   if (!token || !me) {
     return (
@@ -302,10 +323,28 @@ export default function Home() {
                   {expenses.length ? expenses.map((expense) => (
                     <div className="detail-expense-row" key={expense.id}>
                       <div className="expense-symbol">₹</div>
-                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small></div>
+                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small><small className="expense-date">{dateTime(expense.occurredAt)}</small></div>
                       <strong className="detail-expense-amount">{money(expense.amountMinor)}</strong>
                     </div>
                   )) : <div className="empty-state"><strong>No expenses yet</strong><p>Add the first expense for this group below.</p></div>}
+                </section>
+
+
+                <section className="panel detail-panel activity-panel">
+                  <div className="panel-heading"><div><h2>Group activity</h2><p className="muted">Recent changes in this group.</p></div><span className="count-pill">{activity.length}</span></div>
+                  {activity.length ? (
+                    <div className="activity-list">
+                      {activity.map((event) => (
+                        <div className="activity-row" key={event.id}>
+                          <span className="activity-dot" />
+                          <div className="activity-copy">
+                            <strong>{event.actor.displayName}</strong> {activityDescription(event)}
+                            <small>{dateTime(event.createdAt)}</small>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <div className="empty-state"><strong>No activity yet</strong><p>Group changes will appear here.</p></div>}
                 </section>
 
                 <section className="panel detail-panel" id="add-expense">
