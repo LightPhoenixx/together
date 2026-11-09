@@ -3,3 +3,11 @@
 @media(max-width:1100px){.group-card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.main{padding:40px 35px}.detail-columns{grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr)}}
 @media(max-width:850px){.sidebar{width:205px}.main{margin-left:205px;width:calc(100% - 205px);padding:35px 25px}.detail-columns{grid-template-columns:1fr}.create-group-panel{align-items:stretch;flex-direction:column}.create-group-form{width:100%}}
 @media(max-width:650px){.sidebar{position:static;width:100%;height:auto;padding:15px 18px;border-right:0;border-bottom:1px solid var(--line)}.shell{display:block}.brand{margin:0 0 12px}.sidebar nav{display:flex;overflow:auto}.sidebar nav button{padding:8px 10px;font-size:12px;white-space:nowrap}.sidebar-bottom{display:none}.main{margin:0;width:100%;padding:27px 17px}.main header{align-items:flex-start;flex-direction:column}.groups-header{gap:14px;margin-bottom:30px}.header-user{display:none}.group-overview-top{align-items:flex-start;flex-direction:column;gap:5px}.group-card-grid{grid-template-columns:1fr;gap:11px}.group-card{min-height:155px}.create-group-form{flex-direction:column}.create-group-form .primary{width:100%}.detail-header{flex-direction:column;align-items:flex-start}.group-balance-hero{align-items:flex-start;flex-direction:column;padding:22px}.hero-breakdown{width:100%;padding:17px 0 0;border-left:0;border-top:1px solid #ffffff25;gap:0;justify-content:space-between}.expense-form{grid-template-columns:1fr}.expense-form .primary{width:100%}.auth-card{padding:26px 22px}.invite-form{align-items:stretch}.detail-expense-row{gap:9px}.detail-expense-amount{font-size:12px}}
+
+.expense-date{color:#8a958d;font-size:10px}
+.activity-list{display:grid}
+.activity-row{display:flex;gap:12px;position:relative;padding:13px 0;border-top:1px solid #eff2ef}
+.activity-dot{width:9px;height:9px;border-radius:50%;background:#65a984;flex-shrink:0;margin:5px 0 0 2px;box-shadow:0 0 0 4px #edf5ef}
+.activity-copy{font-size:12px;line-height:1.55;color:#65736a}
+.activity-copy strong{color:var(--ink)}
+.activity-copy small{display:block;color:var(--muted);font-size:10px;margin-top:3px}
