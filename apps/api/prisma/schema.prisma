@@ -33,6 +33,10 @@ enum SplitMethod {
   PERCENTAGE
   SHARES
 }
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+}
 enum RecurrenceFrequency {
   WEEKLY
   MONTHLY
@@ -59,6 +63,9 @@ model User {
   auditEvents   AuditEvent[]
   friendshipsSent Friendship[] @relation("FriendshipRequester")
   friendshipsReceived Friendship[] @relation("FriendshipAddressee")
+  directExpensesCreated DirectExpense[] @relation("DirectExpenseCreator")
+  directExpensesPaid DirectExpense[] @relation("DirectExpensePayer")
+  directExpensesWith DirectExpense[] @relation("DirectExpenseOtherUser")
 }
 
 model Group {
@@ -222,9 +229,29 @@ model Friendship {
   id          String   @id @default(cuid())
   requesterId String
   addresseeId String
+  status      FriendshipStatus @default(PENDING)
   createdAt   DateTime @default(now())
   requester   User     @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
   addressee   User     @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
   @@unique([requesterId, addresseeId])
   @@index([addresseeId])
+  @@index([status, addresseeId])
+}
+
+model DirectExpense {
+  id String @id @default(cuid())
+  createdById String
+  payerId String
+  otherUserId String
+  description String
+  amountMinor BigInt
+  currency String @default("INR")
+  occurredAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy User @relation("DirectExpenseCreator", fields: [createdById], references: [id])
+  payer User @relation("DirectExpensePayer", fields: [payerId], references: [id])
+  otherUser User @relation("DirectExpenseOtherUser", fields: [otherUserId], references: [id])
+  @@index([payerId, otherUserId, occurredAt])
+  @@index([otherUserId, payerId, occurredAt])
 }
