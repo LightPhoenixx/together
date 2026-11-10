@@ -118,8 +118,10 @@ export default function Home() {
       setSuggestions([]);
       return;
     }
+    setSettlementPayer(me?.id || '');
+    setSettlementPayee('');
     refreshSelected(selected).catch((e) => setError(e.message));
-  }, [selected, token, refreshSelected]);
+  }, [selected, token, refreshSelected, me?.id]);
 
   async function submitAuth(e: FormEvent) {
     e.preventDefault();
