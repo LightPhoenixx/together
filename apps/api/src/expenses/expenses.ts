@@ -207,6 +207,8 @@ class ExpensesService {
         afterData: { expenseId, description: existing.description, amountMinor: Number(existing.amountMinor), category: existing.category },
       } });
     });
+    const group = await this.db.group.findUnique({ where: { id: groupId }, include: { members: true } });
+    await notifyUsers(this.db, (group?.members || []).map(m => m.userId), userId, { type: 'GROUP_EXPENSE_RESTORED', title: 'Group expense restored', message: `${existing.description} was restored.`, groupId, entityType: 'EXPENSE', entityId: expenseId });
     return { restored: true };
   }
 
