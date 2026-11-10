@@ -93,6 +93,7 @@ class FriendsService {
     const friendShare = amount - myShare;
     const row = await this.db.directExpense.update({ where: { id }, data: { description, amountMinor: BigInt(amount), createdByShareMinor: BigInt(myShare), otherUserShareMinor: BigInt(friendShare), payerId, occurredAt } });
     await this.log(userId, friendId, 'DIRECT_EXPENSE_UPDATED', { expenseId: id, description, amountMinor: amount, payerId, myShareMinor: myShare, friendShareMinor: friendShare });
+    await notifyUsers(this.db, [friendId], userId, { type: 'DIRECT_EXPENSE_UPDATED', title: 'Friend expense updated', message: `${description} was updated.`, entityType: 'DIRECT_EXPENSE', entityId: id });
     return { ...row, amountMinor: amount, createdByShareMinor: myShare, otherUserShareMinor: friendShare };
   }
   async deleteDirectExpense(userId: string, friendId: string, id: string) {
@@ -100,7 +101,9 @@ class FriendsService {
     if (old.createdById !== userId) throw new ForbiddenException('Only the person who added this expense can delete it.');
     if (old.deletedAt) throw new BadRequestException('This expense is already deleted.');
     await this.db.directExpense.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.log(userId, friendId, 'DIRECT_EXPENSE_DELETED', { expenseId: id, description: old.description, amountMinor: Number(old.amountMinor) }); return { deleted: true };
+    await this.log(userId, friendId, 'DIRECT_EXPENSE_DELETED', { expenseId: id, description: old.description, amountMinor: Number(old.amountMinor) });
+    await notifyUsers(this.db, [friendId], userId, { type: 'DIRECT_EXPENSE_DELETED', title: 'Friend expense deleted', message: `${old.description} was deleted.`, entityType: 'DIRECT_EXPENSE', entityId: id });
+    return { deleted: true };
   }
   async addSettlement(userId: string, friendId: string, body: any) {
     await this.acceptedFriend(userId, friendId);
