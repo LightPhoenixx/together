@@ -21,7 +21,9 @@ type DebtSuggestion = { payer: { id: string; displayName: string }; payee: { id:
 type Friend = { id: string; displayName: string; email: string };
 type FriendRequest = { id: string; user: Friend; createdAt: string };
 type FriendBalance = { friend: Friend; netAmountMinor: number };
-type DirectExpense = { id: string; description: string; amountMinor: number; occurredAt: string; payerId: string; payer: Friend };
+type DirectExpense = { id: string; description: string; amountMinor: number; occurredAt: string; payerId: string; createdById: string; createdByShareMinor: number; otherUserShareMinor: number; deletedAt?: string | null; payer: Friend };
+type FriendSettlement = { id: string; payerId: string; payeeId: string; amountMinor: number; method: string; note?: string | null; paidAt: string; payer: Friend; payee: Friend };
+type FriendActivity = { id: string; action: string; createdAt: string; actor: { id: string; displayName: string }; afterData?: Record<string, unknown> | null };
 type ActivityEvent = {
   id: string;
   action: string;
@@ -83,6 +85,14 @@ export default function Home() {
   const [directDescription, setDirectDescription] = useState('');
   const [directAmount, setDirectAmount] = useState('');
   const [directPayer, setDirectPayer] = useState('me');
+  const [directMyShare, setDirectMyShare] = useState('');
+  const [editingDirectExpenseId, setEditingDirectExpenseId] = useState('');
+  const [friendSettlements, setFriendSettlements] = useState<FriendSettlement[]>([]);
+  const [friendActivity, setFriendActivity] = useState<FriendActivity[]>([]);
+  const [directSettlementAmount, setDirectSettlementAmount] = useState('');
+  const [directSettlementPayer, setDirectSettlementPayer] = useState('me');
+  const [directSettlementMethod, setDirectSettlementMethod] = useState('UPI');
+  const [directSettlementNote, setDirectSettlementNote] = useState('');
 
   const request = useCallback(async (path: string, options: RequestInit = {}) => {
     const response = await fetch(`${API}${path}`, {
@@ -182,18 +192,60 @@ export default function Home() {
   }
 
   async function openFriend(friend: Friend) {
-    setActiveFriend(friend); setDirectDescription(''); setDirectAmount('');
-    try { setDirectExpenses(await request(`/friends/${friend.id}/expenses`)); }
-    catch (e) { setError((e as Error).message); }
+    setActiveFriend(friend);
+    try {
+      const [expenseRows, settlementRows, activityRows] = await Promise.all([
+        request(`/friends/${friend.id}/expenses`),
+        request(`/friends/${friend.id}/settlements`),
+        request(`/friends/${friend.id}/activity`),
+      ]);
+      setDirectExpenses(expenseRows); setFriendSettlements(settlementRows); setFriendActivity(activityRows);
+    } catch (e) { setError((e as Error).message); }
   }
 
   async function addDirectExpense(e: FormEvent) {
     e.preventDefault(); if (!activeFriend) return;
     try {
       const amountMinor = Math.round(Number(directAmount) * 100);
+      const myShareMinor = directMyShare.trim() ? Math.round(Number(directMyShare) * 100) : undefined;
       if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid amount.');
-      await request(`/friends/${activeFriend.id}/expenses`, { method: 'POST', body: JSON.stringify({ description: directDescription, amountMinor, payerId: directPayer === 'me' ? me?.id : activeFriend.id }) });
-      setDirectDescription(''); setDirectAmount('');
+      if (myShareMinor !== undefined && (!Number.isSafeInteger(myShareMinor) || myShareMinor < 0 || myShareMinor > amountMinor)) throw new Error('Your share must be between zero and the total.');
+      const editing = Boolean(editingDirectExpenseId);
+      await request(`/friends/${activeFriend.id}/expenses${editing ? `/${editingDirectExpenseId}` : ''}`, {
+        method: editing ? 'PUT' : 'POST',
+        body: JSON.stringify({ description: directDescription, amountMinor, myShareMinor, payerId: directPayer === 'me' ? me?.id : activeFriend.id }),
+      });
+      setDirectDescription(''); setDirectAmount(''); setDirectMyShare(''); setEditingDirectExpenseId('');
+      await openFriend(activeFriend); await refreshFriends();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  function editDirectExpense(item: DirectExpense) {
+    if (!activeFriend || item.createdById !== me?.id) return;
+    setEditingDirectExpenseId(item.id); setDirectDescription(item.description);
+    setDirectAmount((item.amountMinor / 100).toFixed(2));
+    setDirectMyShare((item.createdByShareMinor / 100).toFixed(2));
+    setDirectPayer(item.payerId === me?.id ? 'me' : 'friend');
+  }
+
+  async function deleteDirectExpense(item: DirectExpense) {
+    if (!activeFriend || !window.confirm(`Delete “${item.description}”? This will update your balance.`)) return;
+    try {
+      await request(`/friends/${activeFriend.id}/expenses/${item.id}`, { method: 'DELETE' });
+      await openFriend(activeFriend); await refreshFriends();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function addDirectSettlement(e: FormEvent) {
+    e.preventDefault(); if (!activeFriend) return;
+    try {
+      const amountMinor = Math.round(Number(directSettlementAmount) * 100);
+      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid payment amount.');
+      await request(`/friends/${activeFriend.id}/settlements`, { method: 'POST', body: JSON.stringify({
+        amountMinor, payerId: directSettlementPayer === 'me' ? me?.id : activeFriend.id,
+        method: directSettlementMethod, note: directSettlementNote,
+      }) });
+      setDirectSettlementAmount(''); setDirectSettlementNote('');
       await openFriend(activeFriend); await refreshFriends();
     } catch (e) { setError((e as Error).message); }
   }
@@ -451,7 +503,39 @@ export default function Home() {
             {friendRequests.outgoing.length > 0 && <section className="panel detail-panel"><h2>Sent requests</h2>{friendRequests.outgoing.map(r => <div className="friend-line" key={r.id}><div><strong>{r.user.displayName}</strong><small>{r.user.email} · Pending</small></div></div>)}</section>}
             <section className="group-overview-top"><div><span className="eyebrow">YOUR PEOPLE</span><h2>Friend list <span className="count-pill">{friends.length}</span></h2></div></section>
             <div className="friend-layout"><div className="panel detail-panel friend-list">{friends.length ? friends.map(friend => { const balance = friendBalances.find(b => b.friend.id === friend.id)?.netAmountMinor || 0; return <button className={activeFriend?.id === friend.id ? 'friend-item selected' : 'friend-item'} key={friend.id} onClick={() => openFriend(friend)}><span className="avatar">{friend.displayName.slice(0,1).toUpperCase()}</span><span className="friend-name"><strong>{friend.displayName}</strong><small>{friend.email}</small></span><strong className={balance > 0 ? 'green' : balance < 0 ? 'red' : ''}>{balance > 0 ? `Owes you ${money(balance)}` : balance < 0 ? `You owe ${money(-balance)}` : 'Settled'}</strong></button>; }) : <p className="muted">No friends yet. Send a request to get started.</p>}</div>
-              <div className="panel detail-panel friend-detail">{activeFriend ? <><h2>{activeFriend.displayName}</h2><p className="muted">Direct expenses are split equally between you two.</p><form className="expense-form" onSubmit={addDirectExpense}><input value={directDescription} onChange={e => setDirectDescription(e.target.value)} placeholder="What was it for?" required /><div className="amount-input"><span>₹</span><input type="number" min="0.01" step="0.01" value={directAmount} onChange={e => setDirectAmount(e.target.value)} placeholder="0.00" required /></div><select value={directPayer} onChange={e => setDirectPayer(e.target.value)}><option value="me">Paid by me</option><option value="friend">Paid by {activeFriend.displayName}</option></select><button className="primary">Add direct expense</button></form><h3>Expense history</h3>{directExpenses.map(item => <div className="friend-line" key={item.id}><div><strong>{item.description}</strong><small>{dateTime(item.occurredAt)} · Paid by {item.payerId === me.id ? 'you' : activeFriend.displayName}</small></div><strong>{money(item.amountMinor)}</strong></div>)}{!directExpenses.length && <p className="muted">No direct expenses yet.</p>}</> : <div className="empty-state"><strong>Select a friend</strong><p>Choose someone to view or add direct expenses.</p></div>}</div>
+              <div className="panel detail-panel friend-detail">{activeFriend ? <>
+                <h2>{activeFriend.displayName}</h2>
+                <p className="muted">Track expenses, custom splits and payments between you two.</p>
+                <form className="friend-expense-form" onSubmit={addDirectExpense}>
+                  <label>Description<input value={directDescription} onChange={e => setDirectDescription(e.target.value)} placeholder="What was it for?" required maxLength={120} /></label>
+                  <label>Total amount (₹)<input type="number" min="0.01" step="0.01" value={directAmount} onChange={e => setDirectAmount(e.target.value)} placeholder="0.00" required /></label>
+                  <label>Paid by<select value={directPayer} onChange={e => setDirectPayer(e.target.value)}><option value="me">Me</option><option value="friend">{activeFriend.displayName}</option></select></label>
+                  <label>Your share (₹)<input type="number" min="0" step="0.01" value={directMyShare} onChange={e => setDirectMyShare(e.target.value)} placeholder="Leave blank for equal split" /></label>
+                  <button className="primary">{editingDirectExpenseId ? 'Save changes' : 'Add expense'}</button>
+                  {editingDirectExpenseId && <button type="button" className="secondary" onClick={() => { setEditingDirectExpenseId(''); setDirectDescription(''); setDirectAmount(''); setDirectMyShare(''); }}>Cancel edit</button>}
+                </form>
+                <h3>Expense history</h3>
+                {directExpenses.filter(item => !item.deletedAt).map(item => <div className="friend-line" key={item.id}>
+                  <div><strong>{item.description}</strong><small>{dateTime(item.occurredAt)} · Paid by {item.payerId === me.id ? 'you' : activeFriend.displayName} · Split: {money(item.createdById === me.id ? item.createdByShareMinor : item.otherUserShareMinor)} you / {money(item.createdById === me.id ? item.otherUserShareMinor : item.createdByShareMinor)} friend</small></div>
+                  <strong>{money(item.amountMinor)}</strong>
+                  {item.createdById === me.id && <div className="friend-actions"><button className="secondary" type="button" onClick={() => editDirectExpense(item)}>Edit</button><button className="danger-text" type="button" onClick={() => deleteDirectExpense(item)}>Delete</button></div>}
+                </div>)}
+                {!directExpenses.some(item => !item.deletedAt) && <p className="muted">No direct expenses yet.</p>}
+                <h3>Record a payment</h3>
+                <form className="friend-expense-form" onSubmit={addDirectSettlement}>
+                  <label>Paid by<select value={directSettlementPayer} onChange={e => setDirectSettlementPayer(e.target.value)}><option value="me">Me</option><option value="friend">{activeFriend.displayName}</option></select></label>
+                  <label>Amount (₹)<input type="number" min="0.01" step="0.01" value={directSettlementAmount} onChange={e => setDirectSettlementAmount(e.target.value)} placeholder="0.00" required /></label>
+                  <label>Method<select value={directSettlementMethod} onChange={e => setDirectSettlementMethod(e.target.value)}><option value="UPI">UPI</option><option value="CASH">Cash</option><option value="BANK_TRANSFER">Bank transfer</option><option value="OTHER">Other</option></select></label>
+                  <label>Note (optional)<input value={directSettlementNote} onChange={e => setDirectSettlementNote(e.target.value)} placeholder="Payment note" maxLength={300} /></label>
+                  <button className="primary">Record payment</button>
+                </form>
+                <h3>Payment history</h3>
+                {friendSettlements.map(item => <div className="friend-line" key={item.id}><div><strong>{item.payerId === me.id ? 'You' : activeFriend.displayName} → {item.payeeId === me.id ? 'you' : activeFriend.displayName}</strong><small>{dateTime(item.paidAt)} · {item.method.replaceAll('_',' ')} {item.note ? '· '+item.note : ''}</small></div><strong>{money(item.amountMinor)}</strong></div>)}
+                {!friendSettlements.length && <p className="muted">No payments recorded yet.</p>}
+                <h3>Recent activity</h3>
+                {friendActivity.map(item => <div className="activity-row" key={item.id}><span className="activity-dot" /><div className="activity-copy"><strong>{item.actor.displayName}</strong> {item.action.toLowerCase().replaceAll('_',' ')}<small>{dateTime(item.createdAt)}</small></div></div>)}
+                {!friendActivity.length && <p className="muted">No activity yet.</p>}
+              </>  : <div className="empty-state"><strong>Select a friend</strong><p>Choose someone to view or add direct expenses.</p></div>}</div>
             </div>
           </>
         ) : !selected ? (
