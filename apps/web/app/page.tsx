@@ -182,6 +182,12 @@ export default function Home() {
     refreshSelected(selected).catch((e) => setError(e.message));
   }, [selected, token, refreshSelected, me?.id]);
 
+  async function sendSettlementReminder(recipientId: string) {
+    if (!selected) return;
+    try { await request('/notifications/remind', { method: 'POST', body: JSON.stringify({ groupId: selected, recipientId }) }); await refreshNotifications(); setError('Reminder sent.'); }
+    catch (e) { setError((e as Error).message); }
+  }
+
   async function refreshNotifications() {
     const data = await request('/notifications');
     setNotifications(data.items || []);
@@ -737,6 +743,7 @@ export default function Home() {
                       <strong className={balance.netAmountMinor > 0 ? 'green' : balance.netAmountMinor < 0 ? 'red' : ''}>
                         {balance.netAmountMinor === 0 ? 'Settled' : balance.netAmountMinor > 0 ? `Owed ${money(balance.netAmountMinor)}` : `Owes ${money(-balance.netAmountMinor)}`}
                       </strong>
+                      {myNet > 0 && balance.user.id !== me.id && balance.netAmountMinor < 0 && <button className="link-button reminder-button" type="button" onClick={() => sendSettlementReminder(balance.user.id)}>Remind</button>}
                     </div>
                   )) : <p className="muted balance-empty">No balances to show yet.</p>}
 
