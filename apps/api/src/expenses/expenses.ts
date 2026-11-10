@@ -105,6 +105,16 @@ class ExpensesService {
     return rows.map(e => this.serialize(e));
   }
 
+  async listDeleted(userId: string, groupId: string) {
+    await this.getGroupMember(userId, groupId);
+    const rows = await this.db.expense.findMany({
+      where: { groupId, status: 'DELETED' },
+      include: { payers: { include: { user: { select: { id: true, displayName: true } } } }, splits: { include: { user: { select: { id: true, displayName: true } } } } },
+      orderBy: { deletedAt: 'desc' },
+    });
+    return rows.map(e => this.serialize(e));
+  }
+
   private async assertCanManage(userId: string, groupId: string, expenseId: string) {
     const expense = await this.db.expense.findFirst({ where: { id: expenseId, groupId, status: 'ACTIVE' }, include: { payers: true, splits: true } });
     if (!expense) throw new NotFoundException('Expense not found.');
@@ -156,6 +166,26 @@ class ExpensesService {
     return { deleted: true };
   }
 
+  async restore(userId: string, groupId: string, expenseId: string) {
+    const existing = await this.db.expense.findFirst({
+      where: { id: expenseId, groupId, status: 'DELETED' },
+      include: { payers: true, splits: true },
+    });
+    if (!existing) throw new NotFoundException('Deleted expense not found.');
+    const member = await this.getGroupMember(userId, groupId);
+    if (existing.createdById !== userId && member.role !== 'OWNER' && member.role !== 'ADMIN') {
+      throw new ForbiddenException('Only the person who added this expense or a group admin can restore it.');
+    }
+    await this.db.$transaction(async (tx: any) => {
+      await tx.expense.update({ where: { id: expenseId }, data: { status: 'ACTIVE', deletedAt: null } });
+      await tx.auditEvent.create({ data: {
+        actorId: userId, entityType: 'GROUP', entityId: groupId, action: 'EXPENSE_RESTORED',
+        afterData: { expenseId, description: existing.description, amountMinor: Number(existing.amountMinor), category: existing.category },
+      } });
+    });
+    return { restored: true };
+  }
+
   async balances(userId: string, groupId: string) {
     await this.getGroupMember(userId, groupId);
     const expenses = await this.db.expense.findMany({ where: { groupId, status: 'ACTIVE' }, include: { payers: true, splits: true } });
@@ -175,6 +205,8 @@ export class ExpensesController {
   constructor(private expenses: ExpensesService) {}
   @Post() create(@Req() req: any, @Param('groupId') id: string, @Body() body: any) { return this.expenses.create(req.user.id, id, body); }
   @Get() list(@Req() req: any, @Param('groupId') id: string, @Query() query: any) { return this.expenses.list(req.user.id, id, query); }
+  @Get('deleted') listDeleted(@Req() req: any, @Param('groupId') id: string) { return this.expenses.listDeleted(req.user.id, id); }
+  @Post(':expenseId/restore') restore(@Req() req: any, @Param('groupId') groupId: string, @Param('expenseId') expenseId: string) { return this.expenses.restore(req.user.id, groupId, expenseId); }
   @Put(':expenseId') update(@Req() req: any, @Param('groupId') groupId: string, @Param('expenseId') expenseId: string, @Body() body: any) { return this.expenses.update(req.user.id, groupId, expenseId, body); }
   @Delete(':expenseId') remove(@Req() req: any, @Param('groupId') groupId: string, @Param('expenseId') expenseId: string) { return this.expenses.remove(req.user.id, groupId, expenseId); }
 }
