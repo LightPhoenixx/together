@@ -89,7 +89,8 @@ class SettlementsService {
       });
       return created;
     }, { isolationLevel: 'Serializable' });
-    await notifyUsers(this.db, [payerId, payeeId], userId, { type: 'GROUP_SETTLEMENT_RECORDED', title: 'Settlement recorded', message: `${settlement.payer.displayName} recorded a payment to ${settlement.payee.displayName}.`, groupId, entityType: 'SETTLEMENT', entityId: settlement.id });\n    return { ...settlement, amountMinor: Number(settlement.amountMinor) };
+    await notifyUsers(this.db, [payerId, payeeId], userId, { type: 'GROUP_SETTLEMENT_RECORDED', title: 'Settlement recorded', message: `${settlement.payer.displayName} recorded a payment to ${settlement.payee.displayName}.`, groupId, entityType: 'SETTLEMENT', entityId: settlement.id });
+    return { ...settlement, amountMinor: Number(settlement.amountMinor) };
   }
 }
 
