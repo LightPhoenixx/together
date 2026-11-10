@@ -2,7 +2,6 @@ import { Body, Controller, Get, Injectable, Param, Post, Req, UseGuards, BadRequ
 import { PrismaService } from '../prisma.service';
 import { AuthGuard } from '../common/auth.guard';
 import { notifyUsers } from '../common/notifications';
-import { notifyUsers } from '../common/notifications';
 
 @Injectable()
 class GroupsService {
