@@ -14,6 +14,8 @@ type Expense = {
   splits: { user: User; amountMinor: number }[];
 };
 type Balance = { user: User; netAmountMinor: number };
+type Settlement = { id: string; payerId: string; payeeId: string; amountMinor: number; method: string; status: string; note?: string | null; paidAt?: string | null; createdAt: string; payer: { id: string; displayName: string }; payee: { id: string; displayName: string } };
+type DebtSuggestion = { payer: { id: string; displayName: string }; payee: { id: string; displayName: string }; amountMinor: number };
 type ActivityEvent = {
   id: string;
   action: string;
@@ -39,6 +41,13 @@ export default function Home() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [suggestions, setSuggestions] = useState<DebtSuggestion[]>([]);
+  const [settlementPayer, setSettlementPayer] = useState('');
+  const [settlementPayee, setSettlementPayee] = useState('');
+  const [settlementAmount, setSettlementAmount] = useState('');
+  const [settlementMethod, setSettlementMethod] = useState('CASH');
+  const [settlementNote, setSettlementNote] = useState('');
   const [groupName, setGroupName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [description, setDescription] = useState('');
@@ -67,14 +76,18 @@ export default function Home() {
 
   const refreshSelected = useCallback(async (id: string) => {
     if (!id) return;
-    const [expenseData, balanceData, activityData] = await Promise.all([
+    const [expenseData, balanceData, activityData, settlementData, suggestionData] = await Promise.all([
       request(`/groups/${id}/expenses`),
       request(`/groups/${id}/balances`),
       request(`/groups/${id}/activity`),
+      request(`/groups/${id}/settlements`),
+      request(`/groups/${id}/settlements/suggestions`),
     ]);
     setExpenses(expenseData);
     setBalances(balanceData);
     setActivity(activityData);
+    setSettlements(settlementData);
+    setSuggestions(suggestionData);
   }, [request]);
 
   useEffect(() => {
@@ -101,6 +114,8 @@ export default function Home() {
       setExpenses([]);
       setBalances([]);
       setActivity([]);
+      setSettlements([]);
+      setSuggestions([]);
       return;
     }
     refreshSelected(selected).catch((e) => setError(e.message));
@@ -188,6 +203,44 @@ export default function Home() {
     }
   }
 
+
+  async function addSettlement(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    const rupees = Number(settlementAmount);
+    if (!Number.isFinite(rupees) || rupees <= 0) {
+      setError('Enter a valid settlement amount.');
+      return;
+    }
+    setError('');
+    setBusy(true);
+    try {
+      await request('/groups/' + selected + '/settlements', {
+        method: 'POST',
+        body: JSON.stringify({
+          payerId: settlementPayer || me?.id,
+          payeeId: settlementPayee,
+          amountMinor: Math.round(rupees * 100),
+          method: settlementMethod,
+          note: settlementNote,
+        }),
+      });
+      setSettlementAmount('');
+      setSettlementNote('');
+      await refreshSelected(selected);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function useSuggestion(suggestion: DebtSuggestion) {
+    setSettlementPayer(suggestion.payer.id);
+    setSettlementPayee(suggestion.payee.id);
+    setSettlementAmount((suggestion.amountMinor / 100).toFixed(2));
+  }
+
   function logout() {
     window.localStorage.removeItem('together-token');
     setToken('');
@@ -205,6 +258,7 @@ export default function Home() {
     if (event.action === 'GROUP_CREATED') return 'created this group';
     if (event.action === 'MEMBER_ADDED') return `added ${String(details.displayName || 'a member')} to the group`;
     if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0))})`;
+    if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0))}`;
     return event.action.toLowerCase().replaceAll('_', ' ');
   };
   const dateTime = (value: string) => new Intl.DateTimeFormat('en-IN', {
@@ -385,6 +439,47 @@ export default function Home() {
                       </strong>
                     </div>
                   )) : <p className="muted balance-empty">No balances to show yet.</p>}
+
+                </section>
+
+                <section className="panel detail-panel">
+                  <div className="panel-heading"><div><h2>Simplify debts</h2><p className="muted">Suggested payments to settle the group.</p></div><span className="count-pill">{suggestions.length}</span></div>
+                  {suggestions.length ? suggestions.map((suggestion, index) => (
+                    <div className="settlement-suggestion" key={suggestion.payer.id + '-' + suggestion.payee.id + '-' + index}>
+                      <div><strong>{suggestion.payer.displayName}</strong><small> pays </small><strong>{suggestion.payee.displayName}</strong><small className="suggestion-amount">{money(suggestion.amountMinor)}</small></div>
+                      <button className="secondary" type="button" onClick={() => useSuggestion(suggestion)}>Record</button>
+                    </div>
+                  )) : <div className="empty-state"><strong>All settled up</strong><p>No payments are currently suggested.</p></div>}
+                </section>
+
+                <section className="panel detail-panel">
+                  <div className="panel-heading"><div><h2>Record a payment</h2><p className="muted">Log a payment already made between group members.</p></div></div>
+                  <form className="settlement-form" onSubmit={addSettlement}>
+                    <label>Paid by<select value={settlementPayer} onChange={e => setSettlementPayer(e.target.value)} required>
+                      <option value="">Choose member</option>
+                      {current?.members.map(m => <option key={m.userId} value={m.userId}>{m.user.displayName}</option>)}
+                    </select></label>
+                    <label>Paid to<select value={settlementPayee} onChange={e => setSettlementPayee(e.target.value)} required>
+                      <option value="">Choose member</option>
+                      {current?.members.filter(m => m.userId !== settlementPayer).map(m => <option key={m.userId} value={m.userId}>{m.user.displayName}</option>)}
+                    </select></label>
+                    <label>Amount (₹)<input type="number" min="0.01" step="0.01" value={settlementAmount} onChange={e => setSettlementAmount(e.target.value)} placeholder="0.00" required /></label>
+                    <label>Payment method<select value={settlementMethod} onChange={e => setSettlementMethod(e.target.value)}>
+                      <option value="CASH">Cash</option><option value="UPI">UPI</option><option value="BANK_TRANSFER">Bank transfer</option><option value="OTHER">Other</option>
+                    </select></label>
+                    <label>Note (optional)<input value={settlementNote} onChange={e => setSettlementNote(e.target.value)} maxLength={300} placeholder="e.g. Paid via UPI" /></label>
+                    <button className="primary" disabled={busy || !settlementPayer || !settlementPayee}>Record payment</button>
+                  </form>
+                </section>
+
+                <section className="panel detail-panel">
+                  <div className="panel-heading"><div><h2>Settlement history</h2><p className="muted">Payments recorded in this group.</p></div><span className="count-pill">{settlements.length}</span></div>
+                  {settlements.length ? settlements.map(settlement => (
+                    <div className="settlement-history-row" key={settlement.id}>
+                      <div><strong>{settlement.payer.displayName} → {settlement.payee.displayName}</strong><small>{settlement.method.replaceAll('_', ' ')} · {settlement.status} · {settlement.paidAt ? dateTime(settlement.paidAt) : dateTime(settlement.createdAt)}</small>{settlement.note && <small>{settlement.note}</small>}</div>
+                      <strong>{money(settlement.amountMinor)}</strong>
+                    </div>
+                  )) : <div className="empty-state"><strong>No payments recorded</strong><p>Payments will appear here once added.</p></div>}
                 </section>
               </aside>
             </div>
