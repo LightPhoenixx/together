@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Injectable, Param, Post, Put, Query, Req, UseGuards, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { AuthGuard } from '../common/auth.guard';
+import { notifyUsers } from '../common/notifications';
 import { splitEqually, assertSplitTotal } from '@expense/shared';
 import { buildNetBalances } from '../settlements/ledger';
 
@@ -80,7 +81,7 @@ class ExpensesService {
       actorId: userId, entityType: 'GROUP', entityId: groupId, action: 'EXPENSE_CREATED',
       afterData: { expenseId: created.id, description: created.description, amountMinor: input.amountMinor, category: input.category, currency: created.currency },
     } });
-    return this.serialize(created);
+    await notifyUsers(this.db, group.members.map(m => m.userId), userId, { type: 'GROUP_EXPENSE_CREATED', title: 'New group expense', message: `${input.description} was added to ${group.name}.`, groupId, entityType: 'EXPENSE', entityId: created.id });\n    return this.serialize(created);
   }
 
 
@@ -170,7 +171,7 @@ class ExpensesService {
       } });
       return row;
     });
-    return this.serialize(updated);
+    await notifyUsers(this.db, group.members.map(m => m.userId), userId, { type: 'GROUP_EXPENSE_UPDATED', title: 'Group expense updated', message: `${input.description} was updated in ${group.name}.`, groupId, entityType: 'EXPENSE', entityId: expenseId });\n    return this.serialize(updated);
   }
 
   async remove(userId: string, groupId: string, expenseId: string) {
@@ -182,7 +183,7 @@ class ExpensesService {
         beforeData: { expenseId, description: existing.description, amountMinor: Number(existing.amountMinor) },
       } });
     });
-    return { deleted: true };
+    const group = await this.db.group.findUnique({ where: { id: groupId }, include: { members: true } });\n    await notifyUsers(this.db, (group?.members || []).map(m => m.userId), userId, { type: 'GROUP_EXPENSE_DELETED', title: 'Group expense deleted', message: `${existing.description} was deleted.`, groupId, entityType: 'EXPENSE', entityId: expenseId });\n    return { deleted: true };
   }
 
   async restore(userId: string, groupId: string, expenseId: string) {
