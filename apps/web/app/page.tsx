@@ -41,6 +41,7 @@ export default function Home() {
   // An empty selected group means the user is on the groups overview.
   const [selected, setSelected] = useState('');
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
@@ -84,14 +85,16 @@ export default function Home() {
 
   const refreshSelected = useCallback(async (id: string) => {
     if (!id) return;
-    const [expenseData, balanceData, activityData, settlementData, suggestionData] = await Promise.all([
+    const [expenseData, deletedExpenseData, balanceData, activityData, settlementData, suggestionData] = await Promise.all([
       request(`/groups/${id}/expenses`),
+      request(`/groups/${id}/expenses/deleted`),
       request(`/groups/${id}/balances`),
       request(`/groups/${id}/activity`),
       request(`/groups/${id}/settlements`),
       request(`/groups/${id}/settlements/suggestions`),
     ]);
     setExpenses(expenseData);
+    setDeletedExpenses(deletedExpenseData);
     setBalances(balanceData);
     setActivity(activityData);
     setSettlements(settlementData);
@@ -120,6 +123,7 @@ export default function Home() {
   useEffect(() => {
     if (!selected || !token) {
       setExpenses([]);
+      setDeletedExpenses([]);
       setBalances([]);
       setActivity([]);
       setSettlements([]);
@@ -227,6 +231,15 @@ export default function Home() {
     document.getElementById('add-expense')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  async function restoreExpense(expense: Expense) {
+    setError('');
+    try {
+      await request(`/groups/${selected}/expenses/${expense.id}/restore`, { method: 'POST' });
+      await refreshSelected(selected);
+      await refreshGroups();
+    } catch (e) { setError((e as Error).message); }
+  }
+
   async function deleteExpense(expense: Expense) {
     if (!window.confirm(`Delete “${expense.description}”? This will recalculate group balances.`)) return;
     setError('');
@@ -300,6 +313,7 @@ export default function Home() {
     if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0))})`;
     if (event.action === 'EXPENSE_UPDATED') return `updated “${String(details.description || 'an expense')}”`;
     if (event.action === 'EXPENSE_DELETED') return `deleted “${String(details.description || event.beforeData?.description || 'an expense')}”`;
+    if (event.action === 'EXPENSE_RESTORED') return `restored “${String(details.description || 'an expense')}”`;
     if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0))} from ${String(details.payerName || 'a member')} to ${String(details.payeeName || 'a member')}`;
     return event.action.toLowerCase().replaceAll('_', ' ');
   };
@@ -435,6 +449,18 @@ export default function Home() {
                   )) : <div className="empty-state"><strong>{expenses.length ? 'No matching expenses' : 'No expenses yet'}</strong><p>{expenses.length ? 'Try another search or category.' : 'Add the first expense for this group below.'}</p></div>}
                 </section>
 
+
+                <section className="panel detail-panel recently-deleted-panel">
+                  <div className="panel-heading"><div><h2>Recently deleted</h2><p className="muted">Restore an expense to include it in group balances again.</p></div><span className="count-pill">{deletedExpenses.length}</span></div>
+                  {deletedExpenses.length ? deletedExpenses.map((expense) => (
+                    <div className="detail-expense-row" key={expense.id}>
+                      <div className="expense-symbol deleted-symbol">↶</div>
+                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · {dateTime(expense.occurredAt)}</small></div>
+                      <strong className="detail-expense-amount">{money(expense.amountMinor)}</strong>
+                      <div className="expense-actions"><button type="button" onClick={() => restoreExpense(expense)}>Restore</button></div>
+                    </div>
+                  )) : <div className="empty-state"><strong>Nothing deleted</strong><p>Deleted expenses will appear here so you can restore them.</p></div>}
+                </section>
 
                 <section className="panel detail-panel activity-panel">
                   <div className="panel-heading"><div><h2>Group activity</h2><p className="muted">Recent changes in this group.</p></div><span className="count-pill">{activity.length}</span></div>
