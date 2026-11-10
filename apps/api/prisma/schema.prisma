@@ -68,6 +68,8 @@ model User {
   directExpensesWith DirectExpense[] @relation("DirectExpenseOtherUser")
   directSettlementsSent DirectSettlement[] @relation("DirectSettlementPayer")
   directSettlementsReceived DirectSettlement[] @relation("DirectSettlementPayee")
+  notificationsReceived Notification[] @relation("NotificationRecipient")
+  notificationsSent Notification[] @relation("NotificationActor")
 }
 
 model Group {
@@ -275,4 +277,23 @@ model DirectSettlement {
   payee User @relation("DirectSettlementPayee", fields: [payeeId], references: [id])
   @@index([payerId, payeeId, paidAt])
   @@index([payeeId, payerId, paidAt])
+}
+
+
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  actorId    String?
+  groupId    String?
+  type       String
+  title      String
+  message    String
+  entityType String?
+  entityId   String?
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+  user       User     @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor      User?    @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([userId, readAt, createdAt])
+  @@index([groupId, createdAt])
 }
