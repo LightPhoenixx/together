@@ -24,6 +24,7 @@ type FriendBalance = { friend: Friend; netAmountMinor: number };
 type DirectExpense = { id: string; description: string; amountMinor: number; occurredAt: string; payerId: string; createdById: string; createdByShareMinor: number; otherUserShareMinor: number; deletedAt?: string | null; payer: Friend };
 type FriendSettlement = { id: string; payerId: string; payeeId: string; amountMinor: number; method: string; note?: string | null; paidAt: string; payer: Friend; payee: Friend };
 type FriendActivity = { id: string; action: string; createdAt: string; actor: { id: string; displayName: string }; afterData?: Record<string, unknown> | null };
+type AppNotification = { id: string; type: string; title: string; message: string; readAt: string | null; createdAt: string; actor?: { id: string; displayName: string } | null };
 type ActivityEvent = {
   id: string;
   action: string;
@@ -75,6 +76,9 @@ export default function Home() {
   const [recurrenceDate, setRecurrenceDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [view, setView] = useState<'groups' | 'friends'>('groups');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [friendRequests, setFriendRequests] = useState<{ incoming: FriendRequest[]; outgoing: FriendRequest[] }>({ incoming: [], outgoing: [] });
@@ -152,6 +156,9 @@ export default function Home() {
         setMe(user);
         await refreshGroups();
         await refreshFriends();
+        const notificationData = await request('/notifications');
+        setNotifications(notificationData.items || []);
+        setUnreadNotifications(notificationData.unreadCount || 0);
       })
       .catch(() => {
         setToken('');
@@ -174,6 +181,22 @@ export default function Home() {
     setSettlementPayee('');
     refreshSelected(selected).catch((e) => setError(e.message));
   }, [selected, token, refreshSelected, me?.id]);
+
+  async function refreshNotifications() {
+    const data = await request('/notifications');
+    setNotifications(data.items || []);
+    setUnreadNotifications(data.unreadCount || 0);
+  }
+
+  async function markNotificationRead(id: string) {
+    try { await request(`/notifications/${id}/read`, { method: 'POST' }); await refreshNotifications(); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function markAllNotificationsRead() {
+    try { await request('/notifications/read-all', { method: 'POST' }); await refreshNotifications(); }
+    catch (e) { setError((e as Error).message); }
+  }
 
   async function sendFriendRequest(e: FormEvent) {
     e.preventDefault(); setError('');
@@ -484,6 +507,7 @@ export default function Home() {
           <button className={view === 'groups' && !selected ? 'active' : ''} onClick={() => { setView('groups'); setSelected(''); setActiveFriend(null); }}>▦ <span>All groups</span></button>
           <button className={view === 'friends' ? 'active' : ''} onClick={() => { setView('friends'); setSelected(''); setActiveFriend(null); refreshFriends().catch(e => setError(e.message)); }}>♧ <span>Friends</span></button>
           <button className={selected ? 'active' : ''} onClick={() => selected ? setSelected(selected) : undefined} disabled={!selected}>◉ <span>Current group</span></button>
+          <button className={notificationsOpen ? 'active' : ''} onClick={() => { const next = !notificationsOpen; setNotificationsOpen(next); if (next) refreshNotifications().catch(e => setError(e.message)); }}>♧ <span>Notifications</span>{unreadNotifications > 0 && <b className="notification-count">{unreadNotifications}</b>}</button>
         </nav>
         <div className="sidebar-bottom">
           <div className="avatar">{me.displayName.slice(0, 1).toUpperCase()}</div>
@@ -494,6 +518,7 @@ export default function Home() {
 
       <section className="main">
         {error && <div className="error-banner">{error}<button onClick={() => setError('')}>×</button></div>}
+        {notificationsOpen && <section className="panel notification-panel"><div className="panel-heading"><div><h2>Notifications</h2><p className="muted">Updates about your groups and friends.</p></div><button className="secondary" type="button" onClick={markAllNotificationsRead} disabled={!unreadNotifications}>Mark all read</button></div>{notifications.length ? notifications.map(item => <div className={`notification-row ${item.readAt ? 'is-read' : 'is-unread'}`} key={item.id}><div><strong>{item.title}</strong><p>{item.message}</p><small>{dateTime(item.createdAt)}</small></div>{!item.readAt && <button className="link-button" type="button" onClick={() => markNotificationRead(item.id)}>Mark read</button>}</div>) : <p className="muted">You're all caught up.</p>}</section>}
 
         {view === 'friends' ? (
           <>
