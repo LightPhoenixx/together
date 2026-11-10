@@ -90,6 +90,7 @@ model Expense {
   createdById    String
   description    String
   notes          String?
+  category       String        @default("OTHER")
   amountMinor    BigInt
   currency       String
   splitMethod    SplitMethod

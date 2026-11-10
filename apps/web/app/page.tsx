@@ -8,6 +8,7 @@ type Group = { id: string; name: string; currency: string; members: Member[]; _c
 type Expense = {
   id: string;
   description: string;
+  category: string;
   amountMinor: number;
   occurredAt: string;
   payers: { user: User; amountMinor: number }[];
@@ -22,6 +23,7 @@ type ActivityEvent = {
   createdAt: string;
   actor: { id: string; displayName: string };
   afterData?: Record<string, unknown> | null;
+  beforeData?: Record<string, unknown> | null;
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/v1';
@@ -39,6 +41,7 @@ export default function Home() {
   // An empty selected group means the user is on the groups overview.
   const [selected, setSelected] = useState('');
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
@@ -52,6 +55,12 @@ export default function Home() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
+  const [expenseCategory, setExpenseCategory] = useState('OTHER');
+  const [editingExpenseId, setEditingExpenseId] = useState('');
+  const [expenseSearch, setExpenseSearch] = useState('');
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('ALL');
+  const [expenseFromDate, setExpenseFromDate] = useState('');
+  const [expenseToDate, setExpenseToDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -76,14 +85,16 @@ export default function Home() {
 
   const refreshSelected = useCallback(async (id: string) => {
     if (!id) return;
-    const [expenseData, balanceData, activityData, settlementData, suggestionData] = await Promise.all([
+    const [expenseData, deletedExpenseData, balanceData, activityData, settlementData, suggestionData] = await Promise.all([
       request(`/groups/${id}/expenses`),
+      request(`/groups/${id}/expenses/deleted`),
       request(`/groups/${id}/balances`),
       request(`/groups/${id}/activity`),
       request(`/groups/${id}/settlements`),
       request(`/groups/${id}/settlements/suggestions`),
     ]);
     setExpenses(expenseData);
+    setDeletedExpenses(deletedExpenseData);
     setBalances(balanceData);
     setActivity(activityData);
     setSettlements(settlementData);
@@ -112,6 +123,7 @@ export default function Home() {
   useEffect(() => {
     if (!selected || !token) {
       setExpenses([]);
+      setDeletedExpenses([]);
       setBalances([]);
       setActivity([]);
       setSettlements([]);
@@ -186,18 +198,23 @@ export default function Home() {
     }
     setError('');
     try {
-      await request(`/groups/${selected}/expenses`, {
-        method: 'POST',
-        body: JSON.stringify({
-          description,
-          amountMinor: Math.round(rupees * 100),
-          payerIds: [me?.id],
-          splitUserIds: groups.find((g) => g.id === selected)?.members.map((m) => m.userId),
-          splitMethod: 'EQUAL',
-        }),
+      const existing = expenses.find((item) => item.id === editingExpenseId);
+      const payload = {
+        description,
+        category: expenseCategory,
+        amountMinor: Math.round(rupees * 100),
+        payerIds: existing ? existing.payers.map((p) => p.user.id) : [me?.id],
+        splitUserIds: existing ? existing.splits.map((s) => s.user.id) : groups.find((g) => g.id === selected)?.members.map((m) => m.userId),
+        splitMethod: 'EQUAL',
+      };
+      await request(`/groups/${selected}/expenses${editingExpenseId ? `/${editingExpenseId}` : ''}`, {
+        method: editingExpenseId ? 'PUT' : 'POST',
+        body: JSON.stringify(payload),
       });
       setDescription('');
       setAmount('');
+      setExpenseCategory('OTHER');
+      setEditingExpenseId('');
       await refreshSelected(selected);
       await refreshGroups();
     } catch (e) {
@@ -205,6 +222,33 @@ export default function Home() {
     }
   }
 
+
+  function editExpense(expense: Expense) {
+    setEditingExpenseId(expense.id);
+    setDescription(expense.description);
+    setAmount((expense.amountMinor / 100).toFixed(2));
+    setExpenseCategory(expense.category || 'OTHER');
+    document.getElementById('add-expense')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function restoreExpense(expense: Expense) {
+    setError('');
+    try {
+      await request(`/groups/${selected}/expenses/${expense.id}/restore`, { method: 'POST' });
+      await refreshSelected(selected);
+      await refreshGroups();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function deleteExpense(expense: Expense) {
+    if (!window.confirm(`Delete “${expense.description}”? This will recalculate group balances.`)) return;
+    setError('');
+    try {
+      await request(`/groups/${selected}/expenses/${expense.id}`, { method: 'DELETE' });
+      await refreshSelected(selected);
+      await refreshGroups();
+    } catch (e) { setError((e as Error).message); }
+  }
 
   async function addSettlement(e: FormEvent) {
     e.preventDefault();
@@ -253,6 +297,13 @@ export default function Home() {
 
   const current = useMemo(() => groups.find((g) => g.id === selected), [groups, selected]);
   const myNet = balances.find((b) => b.user.id === me?.id)?.netAmountMinor || 0;
+  const visibleExpenses = expenses.filter((expense) => {
+    const term = expenseSearch.trim().toLowerCase();
+    const matchesSearch = !term || expense.description.toLowerCase().includes(term) || expense.category.toLowerCase().includes(term) || expense.payers.some((p) => p.user.displayName.toLowerCase().includes(term));
+    const expenseDate = new Date(expense.occurredAt).toISOString().slice(0, 10);
+    const matchesDates = (!expenseFromDate || expenseDate >= expenseFromDate) && (!expenseToDate || expenseDate <= expenseToDate);
+    return matchesSearch && matchesDates && (expenseCategoryFilter === 'ALL' || expense.category === expenseCategoryFilter);
+  });
   const totalOwed = Math.max(myNet, 0);
   const totalOwe = Math.max(-myNet, 0);
   const activityDescription = (event: ActivityEvent) => {
@@ -260,6 +311,9 @@ export default function Home() {
     if (event.action === 'GROUP_CREATED') return 'created this group';
     if (event.action === 'MEMBER_ADDED') return `added ${String(details.displayName || 'a member')} to the group`;
     if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0))})`;
+    if (event.action === 'EXPENSE_UPDATED') return `updated “${String(details.description || 'an expense')}”`;
+    if (event.action === 'EXPENSE_DELETED') return `deleted “${String(details.description || event.beforeData?.description || 'an expense')}”`;
+    if (event.action === 'EXPENSE_RESTORED') return `restored “${String(details.description || 'an expense')}”`;
     if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0))} from ${String(details.payerName || 'a member')} to ${String(details.payeeName || 'a member')}`;
     return event.action.toLowerCase().replaceAll('_', ' ');
   };
@@ -375,16 +429,38 @@ export default function Home() {
             <div className="detail-columns">
               <div className="detail-primary-column">
                 <section className="panel detail-panel">
-                  <div className="panel-heading"><div><h2>Recent expenses</h2><p className="muted">Everything recorded in this group.</p></div><span className="count-pill">{expenses.length}</span></div>
-                  {expenses.length ? expenses.map((expense) => (
+                  <div className="panel-heading"><div><h2>Expenses</h2><p className="muted">Search, filter, edit or remove group expenses.</p></div><span className="count-pill">{visibleExpenses.length} / {expenses.length}</span></div>
+                  <div className="expense-filters">
+                    <input value={expenseSearch} onChange={(e) => setExpenseSearch(e.target.value)} placeholder="Search description or payer…" aria-label="Search expenses" />
+                    <select value={expenseCategoryFilter} onChange={(e) => setExpenseCategoryFilter(e.target.value)} aria-label="Filter by category">
+                      <option value="ALL">All categories</option>
+                      {['FOOD','GROCERIES','TRANSPORT','TRAVEL','RENT','UTILITIES','SHOPPING','ENTERTAINMENT','HEALTH','OTHER'].map((category) => <option key={category} value={category}>{category.replaceAll('_',' ')}</option>)}
+                    </select>
+                    <input type="date" aria-label="From date" value={expenseFromDate} onChange={(e) => setExpenseFromDate(e.target.value)} />
+                    <input type="date" aria-label="To date" value={expenseToDate} onChange={(e) => setExpenseToDate(e.target.value)} />
+                  </div>
+                  {visibleExpenses.length ? visibleExpenses.map((expense) => (
                     <div className="detail-expense-row" key={expense.id}>
                       <div className="expense-symbol">₹</div>
-                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small><small className="expense-date">{dateTime(expense.occurredAt)}</small></div>
+                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small><small className="expense-date">{dateTime(expense.occurredAt)}</small></div>
                       <strong className="detail-expense-amount">{money(expense.amountMinor)}</strong>
+                      <div className="expense-actions"><button type="button" onClick={() => editExpense(expense)}>Edit</button><button type="button" onClick={() => deleteExpense(expense)}>Delete</button></div>
                     </div>
-                  )) : <div className="empty-state"><strong>No expenses yet</strong><p>Add the first expense for this group below.</p></div>}
+                  )) : <div className="empty-state"><strong>{expenses.length ? 'No matching expenses' : 'No expenses yet'}</strong><p>{expenses.length ? 'Try another search or category.' : 'Add the first expense for this group below.'}</p></div>}
                 </section>
 
+
+                <section className="panel detail-panel recently-deleted-panel">
+                  <div className="panel-heading"><div><h2>Recently deleted</h2><p className="muted">Restore an expense to include it in group balances again.</p></div><span className="count-pill">{deletedExpenses.length}</span></div>
+                  {deletedExpenses.length ? deletedExpenses.map((expense) => (
+                    <div className="detail-expense-row" key={expense.id}>
+                      <div className="expense-symbol deleted-symbol">↶</div>
+                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · {dateTime(expense.occurredAt)}</small></div>
+                      <strong className="detail-expense-amount">{money(expense.amountMinor)}</strong>
+                      <div className="expense-actions"><button type="button" onClick={() => restoreExpense(expense)}>Restore</button></div>
+                    </div>
+                  )) : <div className="empty-state"><strong>Nothing deleted</strong><p>Deleted expenses will appear here so you can restore them.</p></div>}
+                </section>
 
                 <section className="panel detail-panel activity-panel">
                   <div className="panel-heading"><div><h2>Group activity</h2><p className="muted">Recent changes in this group.</p></div><span className="count-pill">{activity.length}</span></div>
@@ -404,11 +480,15 @@ export default function Home() {
                 </section>
 
                 <section className="panel detail-panel" id="add-expense">
-                  <div className="panel-heading"><div><h2>Add an expense</h2><p className="muted">Paid by you and split equally among group members.</p></div><span className="add-expense-symbol">＋</span></div>
+                  <div className="panel-heading"><div><h2>{editingExpenseId ? 'Edit expense' : 'Add an expense'}</h2><p className="muted">Paid by you and split equally among selected group members.</p></div><span className="add-expense-symbol">＋</span></div>
                   <form className="expense-form" onSubmit={addExpense}>
                     <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What was it for? e.g. Groceries" required />
                     <div className="amount-input"><span>₹</span><input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required /></div>
-                    <button className="primary" disabled={!current}>Save expense</button>
+                    <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} aria-label="Expense category">
+                      {['FOOD','GROCERIES','TRANSPORT','TRAVEL','RENT','UTILITIES','SHOPPING','ENTERTAINMENT','HEALTH','OTHER'].map((category) => <option key={category} value={category}>{category.replaceAll('_',' ')}</option>)}
+                    </select>
+                    <button className="primary" disabled={!current}>{editingExpenseId ? 'Save changes' : 'Save expense'}</button>
+                    {editingExpenseId && <button className="secondary" type="button" onClick={() => { setEditingExpenseId(''); setDescription(''); setAmount(''); setExpenseCategory('OTHER'); }}>Cancel edit</button>}
                   </form>
                 </section>
               </div>

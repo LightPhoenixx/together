@@ -23,3 +23,18 @@
 .settlement-form select:focus{outline:2px solid #e8f4ec;border-color:#65a984}
 .settlement-form .primary{width:100%;margin-top:3px}
 @media(max-width:650px){.settlement-suggestion,.settlement-history-row{align-items:flex-start}.settlement-suggestion{flex-direction:column}.settlement-suggestion .secondary{width:100%}}
+
+.expense-filters{display:grid;grid-template-columns:minmax(0,1fr) 170px 145px 145px;gap:9px;margin-bottom:10px}
+.expense-filters select,.expense-form select{width:100%;border:1px solid #dfe7e1;border-radius:8px;padding:11px 12px;background:#fff;color:var(--ink);font:inherit;min-width:0}
+.expense-actions{display:flex;gap:5px;flex-shrink:0}
+.expense-actions button{border:0;background:#edf5ef;color:#26734e;border-radius:7px;padding:7px 9px;font-size:10px;font-weight:700}
+.expense-actions button:last-child{background:#fff0ee;color:#b54739}
+.expense-form{grid-template-columns:minmax(0,1fr) 140px 150px auto}
+@media(max-width:900px){.expense-form{grid-template-columns:1fr 1fr}.expense-form button{width:100%}}
+@media(max-width:650px){.expense-filters{grid-template-columns:1fr}.detail-expense-row{flex-wrap:wrap}.expense-actions{margin-left:47px}.expense-form{grid-template-columns:1fr}}
+
+@media(max-width:900px){.expense-filters{grid-template-columns:1fr 1fr}}
+
+.recently-deleted-panel{border-style:dashed;background:#fcfdfc}
+.deleted-symbol{background:#f2f0ec;color:#887b68;font-size:18px}
+.recently-deleted-panel .expense-actions button{background:#edf5ef;color:#26734e}
