@@ -38,3 +38,9 @@
 .recently-deleted-panel{border-style:dashed;background:#fcfdfc}
 .deleted-symbol{background:#f2f0ec;color:#887b68;font-size:18px}
 .recently-deleted-panel .expense-actions button{background:#edf5ef;color:#26734e}
+
+.duplicate-warning{border-color:#e7c98a;background:#fffdf7}
+.duplicate-warning h3{margin-bottom:6px}
+.duplicate-row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid #f1ead8;font-size:12px}
+.duplicate-row span{color:var(--muted)}
+.duplicate-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:13px}

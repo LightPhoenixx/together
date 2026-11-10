@@ -15,6 +15,7 @@ type Expense = {
   splits: { user: User; amountMinor: number }[];
 };
 type Balance = { user: User; netAmountMinor: number };
+type DuplicateExpense = { id: string; description: string; amountMinor: number; occurredAt: string };
 type Settlement = { id: string; payerId: string; payeeId: string; amountMinor: number; method: string; status: string; note?: string | null; paidAt?: string | null; createdAt: string; payer: { id: string; displayName: string }; payee: { id: string; displayName: string } };
 type DebtSuggestion = { payer: { id: string; displayName: string }; payee: { id: string; displayName: string }; amountMinor: number };
 type ActivityEvent = {
@@ -61,6 +62,11 @@ export default function Home() {
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('ALL');
   const [expenseFromDate, setExpenseFromDate] = useState('');
   const [expenseToDate, setExpenseToDate] = useState('');
+  const [duplicateCandidates, setDuplicateCandidates] = useState<DuplicateExpense[]>([]);
+  const [pendingExpensePayload, setPendingExpensePayload] = useState<any>(null);
+  const [recurringExpenses, setRecurringExpenses] = useState<any[]>([]);
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState('MONTHLY');
+  const [recurrenceDate, setRecurrenceDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -99,6 +105,8 @@ export default function Home() {
     setActivity(activityData);
     setSettlements(settlementData);
     setSuggestions(suggestionData);
+    const recurringData = await request(`/groups/${id}/recurring-expenses`);
+    setRecurringExpenses(recurringData);
   }, [request]);
 
   useEffect(() => {
@@ -188,40 +196,51 @@ export default function Home() {
     }
   }
 
+  async function submitExpensePayload(payload: any) {
+    await request(`/groups/${selected}/expenses${editingExpenseId ? `/${editingExpenseId}` : ''}`, {
+      method: editingExpenseId ? 'PUT' : 'POST', body: JSON.stringify(payload),
+    });
+    setDescription(''); setAmount(''); setExpenseCategory('OTHER'); setEditingExpenseId('');
+    setDuplicateCandidates([]); setPendingExpensePayload(null);
+    await refreshSelected(selected); await refreshGroups();
+  }
+
   async function addExpense(e: FormEvent) {
     e.preventDefault();
     if (!selected) return;
     const rupees = Number(amount);
-    if (!Number.isFinite(rupees) || rupees <= 0) {
-      setError('Enter a valid amount.');
-      return;
-    }
+    if (!Number.isFinite(rupees) || rupees <= 0) { setError('Enter a valid amount.'); return; }
     setError('');
     try {
       const existing = expenses.find((item) => item.id === editingExpenseId);
       const payload = {
-        description,
-        category: expenseCategory,
-        amountMinor: Math.round(rupees * 100),
+        description, category: expenseCategory, amountMinor: Math.round(rupees * 100),
         payerIds: existing ? existing.payers.map((p) => p.user.id) : [me?.id],
         splitUserIds: existing ? existing.splits.map((s) => s.user.id) : groups.find((g) => g.id === selected)?.members.map((m) => m.userId),
         splitMethod: 'EQUAL',
       };
-      await request(`/groups/${selected}/expenses${editingExpenseId ? `/${editingExpenseId}` : ''}`, {
-        method: editingExpenseId ? 'PUT' : 'POST',
-        body: JSON.stringify(payload),
-      });
-      setDescription('');
-      setAmount('');
-      setExpenseCategory('OTHER');
-      setEditingExpenseId('');
-      await refreshSelected(selected);
-      await refreshGroups();
-    } catch (e) {
-      setError((e as Error).message);
-    }
+      if (!editingExpenseId) {
+        const duplicates = await request(`/groups/${selected}/expenses/duplicate-check`, { method: 'POST', body: JSON.stringify(payload) });
+        if (duplicates.length) { setDuplicateCandidates(duplicates); setPendingExpensePayload(payload); return; }
+      }
+      await submitExpensePayload(payload);
+    } catch (e) { setError((e as Error).message); }
   }
 
+  async function createRecurringExpense(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    try {
+      const amountMinor = Math.round(Number(amount) * 100);
+      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid amount first in the expense form.');
+      await request(`/groups/${selected}/recurring-expenses`, { method: 'POST', body: JSON.stringify({
+        description, amountMinor, category: expenseCategory, frequency: recurrenceFrequency,
+        nextRunAt: recurrenceDate ? new Date(`${recurrenceDate}T09:00:00`).toISOString() : new Date().toISOString(),
+      }) });
+      await refreshSelected(selected);
+      setError('');
+    } catch (e) { setError((e as Error).message); }
+  }
 
   function editExpense(expense: Expense) {
     setEditingExpenseId(expense.id);
@@ -490,6 +509,29 @@ export default function Home() {
                     <button className="primary" disabled={!current}>{editingExpenseId ? 'Save changes' : 'Save expense'}</button>
                     {editingExpenseId && <button className="secondary" type="button" onClick={() => { setEditingExpenseId(''); setDescription(''); setAmount(''); setExpenseCategory('OTHER'); }}>Cancel edit</button>}
                   </form>
+                </section>
+
+                {duplicateCandidates.length > 0 && (
+                  <section className="panel duplicate-warning">
+                    <h3>Possible duplicate expense</h3>
+                    <p className="muted">A similar expense already exists on this date. You can still add it if this is intentional.</p>
+                    {duplicateCandidates.map(item => <div className="duplicate-row" key={item.id}><strong>{item.description}</strong><span>{money(item.amountMinor)} · {dateTime(item.occurredAt)}</span></div>)}
+                    <div className="duplicate-actions">
+                      <button className="secondary" type="button" onClick={() => { setDuplicateCandidates([]); setPendingExpensePayload(null); }}>Cancel</button>
+                      <button className="primary" type="button" onClick={async () => { try { await submitExpensePayload(pendingExpensePayload); } catch (e) { setError((e as Error).message); } }}>Add anyway</button>
+                    </div>
+                  </section>
+                )}
+
+                <section className="panel detail-panel">
+                  <div className="panel-heading"><div><h2>Recurring expenses</h2><p className="muted">Automatically add a copy on each scheduled date.</p></div><span className="count-pill">{recurringExpenses.length}</span></div>
+                  <form className="settlement-form" onSubmit={createRecurringExpense}>
+                    <label>Repeat<select value={recurrenceFrequency} onChange={e => setRecurrenceFrequency(e.target.value)}><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option></select></label>
+                    <label>First due date<input type="date" value={recurrenceDate} onChange={e => setRecurrenceDate(e.target.value)} /></label>
+                    <button className="secondary" type="submit">Create recurring schedule from expense form</button>
+                  </form>
+                  {recurringExpenses.map(rule => <div className="settlement-history-row" key={rule.id}><div><strong>{rule.description}</strong><small>{rule.frequency.toLowerCase()} · Next: {dateTime(rule.nextRunAt)} · {rule.isActive ? 'Active' : 'Paused'}</small></div><strong>{money(rule.amountMinor)}</strong></div>)}
+                  {!recurringExpenses.length && <p className="muted">No recurring schedules yet. Fill the expense description and amount above, then choose a frequency.</p>}
                 </section>
               </div>
 
