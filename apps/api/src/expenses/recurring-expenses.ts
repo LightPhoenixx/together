@@ -53,11 +53,12 @@ class RecurringExpensesService implements OnModuleInit, OnModuleDestroy {
     if (!payerIds.length || !splitUserIds.length || [...payerIds, ...splitUserIds].some(id => !memberIds.includes(id))) throw new BadRequestException('Payers and participants must be group members.');
     const endsAt = body.endsAt ? new Date(body.endsAt) : null;
     if (endsAt && (Number.isNaN(endsAt.getTime()) || endsAt < nextRunAt)) throw new BadRequestException('End date must be on or after the first due date.');
-    return this.db.recurringExpense.create({ data: {
+    const created = await this.db.recurringExpense.create({ data: {
       groupId, createdById: userId, description, amountMinor: BigInt(amountMinor), currency: group.currency,
       category: String(body.category || 'OTHER'), notes: typeof body.notes === 'string' ? body.notes.slice(0, 1000) : null,
       frequency, interval, payerIds, splitUserIds, nextRunAt, endsAt,
     } });
+    return { ...created, amountMinor: Number(created.amountMinor) };
   }
 
   async list(userId: string, groupId: string) {
@@ -76,8 +77,8 @@ class RecurringExpensesService implements OnModuleInit, OnModuleDestroy {
       for (const rule of due) {
         let occurrence = new Date(rule.nextRunAt);
         while (occurrence <= now && (!rule.endsAt || occurrence <= rule.endsAt)) {
-          const payerIds = rule.payerIds as string[];
-          const splitIds = rule.splitUserIds as string[];
+          const payerIds = rule.payerIds as unknown as string[];
+          const splitIds = rule.splitUserIds as unknown as string[];
           const payers = splitEqually(Number(rule.amountMinor), payerIds);
           const splits = splitEqually(Number(rule.amountMinor), splitIds);
           try {
