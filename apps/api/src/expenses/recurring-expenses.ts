@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, Injecta
 import { PrismaService } from '../prisma.service';
 import { AuthGuard } from '../common/auth.guard';
 import { splitEqually } from '@expense/shared';
+import { Prisma } from '@prisma/client';
 
 function nextOccurrence(date: Date, frequency: 'WEEKLY' | 'MONTHLY' | 'YEARLY', interval: number) {
   const next = new Date(date);
@@ -56,7 +57,7 @@ class RecurringExpensesService implements OnModuleInit, OnModuleDestroy {
     const created = await this.db.recurringExpense.create({ data: {
       groupId, createdById: userId, description, amountMinor: BigInt(amountMinor), currency: group.currency,
       category: String(body.category || 'OTHER'), notes: typeof body.notes === 'string' ? body.notes.slice(0, 1000) : null,
-      frequency, interval, payerIds, splitUserIds, nextRunAt, endsAt,
+      frequency, interval, payerIds: payerIds as Prisma.InputJsonValue, splitUserIds: splitUserIds as Prisma.InputJsonValue, nextRunAt, endsAt,
     } });
     return { ...created, amountMinor: Number(created.amountMinor) };
   }
