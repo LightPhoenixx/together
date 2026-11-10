@@ -23,6 +23,7 @@ type ActivityEvent = {
   createdAt: string;
   actor: { id: string; displayName: string };
   afterData?: Record<string, unknown> | null;
+  beforeData?: Record<string, unknown> | null;
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/v1';
@@ -57,6 +58,8 @@ export default function Home() {
   const [editingExpenseId, setEditingExpenseId] = useState('');
   const [expenseSearch, setExpenseSearch] = useState('');
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('ALL');
+  const [expenseFromDate, setExpenseFromDate] = useState('');
+  const [expenseToDate, setExpenseToDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -284,7 +287,9 @@ export default function Home() {
   const visibleExpenses = expenses.filter((expense) => {
     const term = expenseSearch.trim().toLowerCase();
     const matchesSearch = !term || expense.description.toLowerCase().includes(term) || expense.category.toLowerCase().includes(term) || expense.payers.some((p) => p.user.displayName.toLowerCase().includes(term));
-    return matchesSearch && (expenseCategoryFilter === 'ALL' || expense.category === expenseCategoryFilter);
+    const expenseDate = new Date(expense.occurredAt).toISOString().slice(0, 10);
+    const matchesDates = (!expenseFromDate || expenseDate >= expenseFromDate) && (!expenseToDate || expenseDate <= expenseToDate);
+    return matchesSearch && matchesDates && (expenseCategoryFilter === 'ALL' || expense.category === expenseCategoryFilter);
   });
   const totalOwed = Math.max(myNet, 0);
   const totalOwe = Math.max(-myNet, 0);
@@ -294,7 +299,7 @@ export default function Home() {
     if (event.action === 'MEMBER_ADDED') return `added ${String(details.displayName || 'a member')} to the group`;
     if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0))})`;
     if (event.action === 'EXPENSE_UPDATED') return `updated “${String(details.description || 'an expense')}”`;
-    if (event.action === 'EXPENSE_DELETED') return `deleted “${String((event as any).beforeData?.description || 'an expense')}”`;
+    if (event.action === 'EXPENSE_DELETED') return `deleted “${String(details.description || event.beforeData?.description || 'an expense')}”`;
     if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0))} from ${String(details.payerName || 'a member')} to ${String(details.payeeName || 'a member')}`;
     return event.action.toLowerCase().replaceAll('_', ' ');
   };
@@ -417,6 +422,8 @@ export default function Home() {
                       <option value="ALL">All categories</option>
                       {['FOOD','GROCERIES','TRANSPORT','TRAVEL','RENT','UTILITIES','SHOPPING','ENTERTAINMENT','HEALTH','OTHER'].map((category) => <option key={category} value={category}>{category.replaceAll('_',' ')}</option>)}
                     </select>
+                    <input type="date" aria-label="From date" value={expenseFromDate} onChange={(e) => setExpenseFromDate(e.target.value)} />
+                    <input type="date" aria-label="To date" value={expenseToDate} onChange={(e) => setExpenseToDate(e.target.value)} />
                   </div>
                   {visibleExpenses.length ? visibleExpenses.map((expense) => (
                     <div className="detail-expense-row" key={expense.id}>
