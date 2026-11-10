@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Injectable, Param, Post, Req, UseGuards, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { AuthGuard } from '../common/auth.guard';
+import { notifyUsers } from '../common/notifications';
 import { buildNetBalances, simplifyNetBalances } from './ledger';
 
 const methods = ['CASH', 'UPI', 'BANK_TRANSFER', 'OTHER'] as const;
@@ -88,7 +89,7 @@ class SettlementsService {
       });
       return created;
     }, { isolationLevel: 'Serializable' });
-    return { ...settlement, amountMinor: Number(settlement.amountMinor) };
+    await notifyUsers(this.db, [payerId, payeeId], userId, { type: 'GROUP_SETTLEMENT_RECORDED', title: 'Settlement recorded', message: `${settlement.payer.displayName} recorded a payment to ${settlement.payee.displayName}.`, groupId, entityType: 'SETTLEMENT', entityId: settlement.id });\n    return { ...settlement, amountMinor: Number(settlement.amountMinor) };
   }
 }
 
