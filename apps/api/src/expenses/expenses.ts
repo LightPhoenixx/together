@@ -83,6 +83,25 @@ class ExpensesService {
     return this.serialize(created);
   }
 
+
+  async findPossibleDuplicates(userId: string, groupId: string, body: any) {
+    await this.getGroupMember(userId, groupId);
+    const amountMinor = Number(body.amountMinor);
+    const description = String(body.description ?? '').trim();
+    const date = body.occurredAt ? new Date(body.occurredAt) : new Date();
+    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0 || !description || Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Enter a valid description, amount and date.');
+    }
+    const start = new Date(date); start.setHours(0, 0, 0, 0);
+    const end = new Date(date); end.setHours(23, 59, 59, 999);
+    const rows = await this.db.expense.findMany({
+      where: { groupId, status: 'ACTIVE', amountMinor: BigInt(amountMinor), occurredAt: { gte: start, lte: end }, description: { equals: description, mode: 'insensitive' } },
+      select: { id: true, description: true, amountMinor: true, occurredAt: true, category: true },
+      take: 5,
+    });
+    return rows.map(row => ({ ...row, amountMinor: Number(row.amountMinor) }));
+  }
+
   async list(userId: string, groupId: string, query: any) {
     await this.getGroupMember(userId, groupId);
     const where: any = { groupId, status: 'ACTIVE' };
@@ -203,6 +222,7 @@ class ExpensesService {
 @UseGuards(AuthGuard)
 export class ExpensesController {
   constructor(private expenses: ExpensesService) {}
+  @Post('duplicate-check') duplicateCheck(@Req() req: any, @Param('groupId') id: string, @Body() body: any) { return this.expenses.findPossibleDuplicates(req.user.id, id, body); }
   @Post() create(@Req() req: any, @Param('groupId') id: string, @Body() body: any) { return this.expenses.create(req.user.id, id, body); }
   @Get() list(@Req() req: any, @Param('groupId') id: string, @Query() query: any) { return this.expenses.list(req.user.id, id, query); }
   @Get('deleted') listDeleted(@Req() req: any, @Param('groupId') id: string) { return this.expenses.listDeleted(req.user.id, id); }
