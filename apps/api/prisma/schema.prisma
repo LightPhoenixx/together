@@ -33,6 +33,11 @@ enum SplitMethod {
   PERCENTAGE
   SHARES
 }
+enum RecurrenceFrequency {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
 
 model User {
   id            String        @id @default(cuid())
@@ -69,6 +74,7 @@ model Group {
   expenses    Expense[]
   settlements Settlement[]
   invites     GroupInvite[]
+  recurringExpenses RecurringExpense[]
   @@index([createdById])
 }
 
@@ -99,12 +105,39 @@ model Expense {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   deletedAt      DateTime?
+  recurringExpenseId String?
+  recurrenceDate DateTime?
+  recurringExpense RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
   group          Group         @relation(fields: [groupId], references: [id])
   payers         ExpensePayer[]
   splits         ExpenseSplit[]
   receipts       Receipt[]
   @@index([groupId, occurredAt])
   @@index([createdById])
+  @@unique([recurringExpenseId, recurrenceDate])
+}
+
+model RecurringExpense {
+  id String @id @default(cuid())
+  groupId String
+  createdById String
+  description String
+  notes String?
+  category String @default("OTHER")
+  amountMinor BigInt
+  currency String
+  frequency RecurrenceFrequency
+  interval Int @default(1)
+  payerIds Json
+  splitUserIds Json
+  nextRunAt DateTime
+  endsAt DateTime?
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  expenses Expense[]
+  @@index([groupId, isActive, nextRunAt])
 }
 
 model ExpensePayer {
