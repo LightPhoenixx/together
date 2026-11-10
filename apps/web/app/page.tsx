@@ -138,7 +138,7 @@ export default function Home() {
   useEffect(() => {
     if (!token) return;
     request('/users/me')
-      .then((user) => {
+      .then(async (user) => {
         setMe(user);
         await refreshGroups();
         await refreshFriends();
