@@ -34,3 +34,7 @@
 @media(max-width:650px){.expense-filters{grid-template-columns:1fr}.detail-expense-row{flex-wrap:wrap}.expense-actions{margin-left:47px}.expense-form{grid-template-columns:1fr}}
 
 @media(max-width:900px){.expense-filters{grid-template-columns:1fr 1fr}}
+
+.recently-deleted-panel{border-style:dashed;background:#fcfdfc}
+.deleted-symbol{background:#f2f0ec;color:#887b68;font-size:18px}
+.recently-deleted-panel .expense-actions button{background:#edf5ef;color:#26734e}
