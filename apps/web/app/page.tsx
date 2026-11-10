@@ -510,6 +510,29 @@ export default function Home() {
                     {editingExpenseId && <button className="secondary" type="button" onClick={() => { setEditingExpenseId(''); setDescription(''); setAmount(''); setExpenseCategory('OTHER'); }}>Cancel edit</button>}
                   </form>
                 </section>
+
+                {duplicateCandidates.length > 0 && (
+                  <section className="panel duplicate-warning">
+                    <h3>Possible duplicate expense</h3>
+                    <p className="muted">A similar expense already exists on this date. You can still add it if this is intentional.</p>
+                    {duplicateCandidates.map(item => <div className="duplicate-row" key={item.id}><strong>{item.description}</strong><span>{money(item.amountMinor)} · {dateTime(item.occurredAt)}</span></div>)}
+                    <div className="duplicate-actions">
+                      <button className="secondary" type="button" onClick={() => { setDuplicateCandidates([]); setPendingExpensePayload(null); }}>Cancel</button>
+                      <button className="primary" type="button" onClick={async () => { try { await submitExpensePayload(pendingExpensePayload); } catch (e) { setError((e as Error).message); } }}>Add anyway</button>
+                    </div>
+                  </section>
+                )}
+
+                <section className="panel detail-panel">
+                  <div className="panel-heading"><div><h2>Recurring expenses</h2><p className="muted">Automatically add a copy on each scheduled date.</p></div><span className="count-pill">{recurringExpenses.length}</span></div>
+                  <form className="settlement-form" onSubmit={createRecurringExpense}>
+                    <label>Repeat<select value={recurrenceFrequency} onChange={e => setRecurrenceFrequency(e.target.value)}><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option></select></label>
+                    <label>First due date<input type="date" value={recurrenceDate} onChange={e => setRecurrenceDate(e.target.value)} /></label>
+                    <button className="secondary" type="submit">Create recurring schedule from expense form</button>
+                  </form>
+                  {recurringExpenses.map(rule => <div className="settlement-history-row" key={rule.id}><div><strong>{rule.description}</strong><small>{rule.frequency.toLowerCase()} · Next: {dateTime(rule.nextRunAt)} · {rule.isActive ? 'Active' : 'Paused'}</small></div><strong>{money(rule.amountMinor)}</strong></div>)}
+                  {!recurringExpenses.length && <p className="muted">No recurring schedules yet. Fill the expense description and amount above, then choose a frequency.</p>}
+                </section>
               </div>
 
               <aside className="detail-side-column">
