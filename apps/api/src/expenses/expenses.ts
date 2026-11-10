@@ -81,7 +81,8 @@ class ExpensesService {
       actorId: userId, entityType: 'GROUP', entityId: groupId, action: 'EXPENSE_CREATED',
       afterData: { expenseId: created.id, description: created.description, amountMinor: input.amountMinor, category: input.category, currency: created.currency },
     } });
-    await notifyUsers(this.db, group.members.map(m => m.userId), userId, { type: 'GROUP_EXPENSE_CREATED', title: 'New group expense', message: `${input.description} was added to ${group.name}.`, groupId, entityType: 'EXPENSE', entityId: created.id });\n    return this.serialize(created);
+    await notifyUsers(this.db, group.members.map(m => m.userId), userId, { type: 'GROUP_EXPENSE_CREATED', title: 'New group expense', message: `${input.description} was added to ${group.name}.`, groupId, entityType: 'EXPENSE', entityId: created.id });
+    return this.serialize(created);
   }
 
 
@@ -171,7 +172,8 @@ class ExpensesService {
       } });
       return row;
     });
-    await notifyUsers(this.db, group.members.map(m => m.userId), userId, { type: 'GROUP_EXPENSE_UPDATED', title: 'Group expense updated', message: `${input.description} was updated in ${group.name}.`, groupId, entityType: 'EXPENSE', entityId: expenseId });\n    return this.serialize(updated);
+    await notifyUsers(this.db, group.members.map(m => m.userId), userId, { type: 'GROUP_EXPENSE_UPDATED', title: 'Group expense updated', message: `${input.description} was updated in ${group.name}.`, groupId, entityType: 'EXPENSE', entityId: expenseId });
+    return this.serialize(updated);
   }
 
   async remove(userId: string, groupId: string, expenseId: string) {
@@ -183,7 +185,9 @@ class ExpensesService {
         beforeData: { expenseId, description: existing.description, amountMinor: Number(existing.amountMinor) },
       } });
     });
-    const group = await this.db.group.findUnique({ where: { id: groupId }, include: { members: true } });\n    await notifyUsers(this.db, (group?.members || []).map(m => m.userId), userId, { type: 'GROUP_EXPENSE_DELETED', title: 'Group expense deleted', message: `${existing.description} was deleted.`, groupId, entityType: 'EXPENSE', entityId: expenseId });\n    return { deleted: true };
+    const group = await this.db.group.findUnique({ where: { id: groupId }, include: { members: true } });
+    await notifyUsers(this.db, (group?.members || []).map(m => m.userId), userId, { type: 'GROUP_EXPENSE_DELETED', title: 'Group expense deleted', message: `${existing.description} was deleted.`, groupId, entityType: 'EXPENSE', entityId: expenseId });
+    return { deleted: true };
   }
 
   async restore(userId: string, groupId: string, expenseId: string) {
