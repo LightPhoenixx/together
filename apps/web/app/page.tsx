@@ -457,13 +457,13 @@ export default function Home() {
                 <section className="panel detail-panel">
                   <div className="panel-heading"><div><h2>Record a payment</h2><p className="muted">Log a payment already made between group members.</p></div></div>
                   <form className="settlement-form" onSubmit={addSettlement}>
-                    <label>Paid by<select value={settlementPayer || me.id} onChange={e => setSettlementPayer(e.target.value)} required>
+                    <label>Paid by<select value={settlementPayer || me.id} onChange={e => { setSettlementPayer(e.target.value); setSettlementPayee(""); }} required>
                       <option value="">Choose member</option>
                       {current?.members.map(m => <option key={m.userId} value={m.userId}>{m.user.displayName}</option>)}
                     </select></label>
                     <label>Paid to<select value={settlementPayee} onChange={e => setSettlementPayee(e.target.value)} required>
                       <option value="">Choose member</option>
-                      {current?.members.filter(m => m.userId !== settlementPayer).map(m => <option key={m.userId} value={m.userId}>{m.user.displayName}</option>)}
+                      {current?.members.filter(m => m.userId !== (settlementPayer || me.id)).map(m => <option key={m.userId} value={m.userId}>{m.user.displayName}</option>)}
                     </select></label>
                     <label>Amount (₹)<input type="number" min="0.01" step="0.01" value={settlementAmount} onChange={e => setSettlementAmount(e.target.value)} placeholder="0.00" required /></label>
                     <label>Payment method<select value={settlementMethod} onChange={e => setSettlementMethod(e.target.value)}>
