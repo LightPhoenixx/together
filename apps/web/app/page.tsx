@@ -18,6 +18,10 @@ type Balance = { user: User; netAmountMinor: number };
 type DuplicateExpense = { id: string; description: string; amountMinor: number; occurredAt: string };
 type Settlement = { id: string; payerId: string; payeeId: string; amountMinor: number; method: string; status: string; note?: string | null; paidAt?: string | null; createdAt: string; payer: { id: string; displayName: string }; payee: { id: string; displayName: string } };
 type DebtSuggestion = { payer: { id: string; displayName: string }; payee: { id: string; displayName: string }; amountMinor: number };
+type Friend = { id: string; displayName: string; email: string };
+type FriendRequest = { id: string; user: Friend; createdAt: string };
+type FriendBalance = { friend: Friend; netAmountMinor: number };
+type DirectExpense = { id: string; description: string; amountMinor: number; occurredAt: string; payerId: string; payer: Friend };
 type ActivityEvent = {
   id: string;
   action: string;
@@ -69,6 +73,16 @@ export default function Home() {
   const [recurrenceDate, setRecurrenceDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<'groups' | 'friends'>('groups');
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendRequests, setFriendRequests] = useState<{ incoming: FriendRequest[]; outgoing: FriendRequest[] }>({ incoming: [], outgoing: [] });
+  const [friendBalances, setFriendBalances] = useState<FriendBalance[]>([]);
+  const [friendEmail, setFriendEmail] = useState('');
+  const [activeFriend, setActiveFriend] = useState<Friend | null>(null);
+  const [directExpenses, setDirectExpenses] = useState<DirectExpense[]>([]);
+  const [directDescription, setDirectDescription] = useState('');
+  const [directAmount, setDirectAmount] = useState('');
+  const [directPayer, setDirectPayer] = useState('me');
 
   const request = useCallback(async (path: string, options: RequestInit = {}) => {
     const response = await fetch(`${API}${path}`, {
@@ -87,6 +101,13 @@ export default function Home() {
   const refreshGroups = useCallback(async () => {
     const data = await request('/groups');
     setGroups(data);
+  }, [request]);
+
+  const refreshFriends = useCallback(async () => {
+    const [friendData, requestData, balanceData] = await Promise.all([request('/friends'), request('/friends/requests'), request('/friends/balances')]);
+    setFriends(friendData.map((item: any) => item.friend));
+    setFriendRequests(requestData);
+    setFriendBalances(balanceData);
   }, [request]);
 
   const refreshSelected = useCallback(async (id: string) => {
@@ -119,14 +140,15 @@ export default function Home() {
     request('/users/me')
       .then((user) => {
         setMe(user);
-        return refreshGroups();
+        await refreshGroups();
+        await refreshFriends();
       })
       .catch(() => {
         setToken('');
         setMe(null);
         window.localStorage.removeItem('together-token');
       });
-  }, [token, request, refreshGroups]);
+  }, [token, request, refreshGroups, refreshFriends]);
 
   useEffect(() => {
     if (!selected || !token) {
@@ -142,6 +164,39 @@ export default function Home() {
     setSettlementPayee('');
     refreshSelected(selected).catch((e) => setError(e.message));
   }, [selected, token, refreshSelected, me?.id]);
+
+  async function sendFriendRequest(e: FormEvent) {
+    e.preventDefault(); setError('');
+    try { await request('/friends/requests', { method: 'POST', body: JSON.stringify({ email: friendEmail }) }); setFriendEmail(''); await refreshFriends(); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function acceptFriendRequest(id: string) {
+    try { await request(`/friends/requests/${id}/accept`, { method: 'POST' }); await refreshFriends(); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function declineFriendRequest(id: string) {
+    try { await request(`/friends/requests/${id}`, { method: 'DELETE' }); await refreshFriends(); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function openFriend(friend: Friend) {
+    setActiveFriend(friend); setDirectDescription(''); setDirectAmount('');
+    try { setDirectExpenses(await request(`/friends/${friend.id}/expenses`)); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function addDirectExpense(e: FormEvent) {
+    e.preventDefault(); if (!activeFriend) return;
+    try {
+      const amountMinor = Math.round(Number(directAmount) * 100);
+      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid amount.');
+      await request(`/friends/${activeFriend.id}/expenses`, { method: 'POST', body: JSON.stringify({ description: directDescription, amountMinor, payerId: directPayer === 'me' ? me?.id : activeFriend.id }) });
+      setDirectDescription(''); setDirectAmount('');
+      await openFriend(activeFriend); await refreshFriends();
+    } catch (e) { setError((e as Error).message); }
+  }
 
   async function submitAuth(e: FormEvent) {
     e.preventDefault();
@@ -374,7 +429,8 @@ export default function Home() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">t</span><span>Together</span></div>
         <nav>
-          <button className={!selected ? 'active' : ''} onClick={() => setSelected('')}>▦ <span>All groups</span></button>
+          <button className={view === 'groups' && !selected ? 'active' : ''} onClick={() => { setView('groups'); setSelected(''); setActiveFriend(null); }}>▦ <span>All groups</span></button>
+          <button className={view === 'friends' ? 'active' : ''} onClick={() => { setView('friends'); setSelected(''); setActiveFriend(null); refreshFriends().catch(e => setError(e.message)); }}>♧ <span>Friends</span></button>
           <button className={selected ? 'active' : ''} onClick={() => selected ? setSelected(selected) : undefined} disabled={!selected}>◉ <span>Current group</span></button>
         </nav>
         <div className="sidebar-bottom">
@@ -387,7 +443,18 @@ export default function Home() {
       <section className="main">
         {error && <div className="error-banner">{error}<button onClick={() => setError('')}>×</button></div>}
 
-        {!selected ? (
+        {view === 'friends' ? (
+          <>
+            <header className="groups-header"><div><p className="eyebrow">YOUR CONNECTIONS</p><h1>Friends</h1><p className="muted">Add friends and track expenses you share directly.</p></div><div className="header-user"><span className="avatar">{me.displayName.slice(0,1).toUpperCase()}</span><span>{me.displayName}</span></div></header>
+            <section className="create-group-panel"><div className="create-copy"><span className="create-plus">＋</span><div><h3>Add a friend</h3><p className="muted">Send a request using their Together account email.</p></div></div><form className="create-group-form" onSubmit={sendFriendRequest}><input type="email" value={friendEmail} onChange={e => setFriendEmail(e.target.value)} placeholder="friend@example.com" required /><button className="primary">Send request</button></form></section>
+            {friendRequests.incoming.length > 0 && <section className="panel detail-panel"><h2>Incoming requests</h2>{friendRequests.incoming.map(r => <div className="friend-line" key={r.id}><div><strong>{r.user.displayName}</strong><small>{r.user.email}</small></div><div className="friend-actions"><button className="primary" onClick={() => acceptFriendRequest(r.id)}>Accept</button><button className="secondary" onClick={() => declineFriendRequest(r.id)}>Decline</button></div></div>)}</section>}
+            {friendRequests.outgoing.length > 0 && <section className="panel detail-panel"><h2>Sent requests</h2>{friendRequests.outgoing.map(r => <div className="friend-line" key={r.id}><div><strong>{r.user.displayName}</strong><small>{r.user.email} · Pending</small></div></div>)}</section>}
+            <section className="group-overview-top"><div><span className="eyebrow">YOUR PEOPLE</span><h2>Friend list <span className="count-pill">{friends.length}</span></h2></div></section>
+            <div className="friend-layout"><div className="panel detail-panel friend-list">{friends.length ? friends.map(friend => { const balance = friendBalances.find(b => b.friend.id === friend.id)?.netAmountMinor || 0; return <button className={activeFriend?.id === friend.id ? 'friend-item selected' : 'friend-item'} key={friend.id} onClick={() => openFriend(friend)}><span className="avatar">{friend.displayName.slice(0,1).toUpperCase()}</span><span className="friend-name"><strong>{friend.displayName}</strong><small>{friend.email}</small></span><strong className={balance > 0 ? 'green' : balance < 0 ? 'red' : ''}>{balance > 0 ? `Owes you ${money(balance)}` : balance < 0 ? `You owe ${money(-balance)}` : 'Settled'}</strong></button>; }) : <p className="muted">No friends yet. Send a request to get started.</p>}</div>
+              <div className="panel detail-panel friend-detail">{activeFriend ? <><h2>{activeFriend.displayName}</h2><p className="muted">Direct expenses are split equally between you two.</p><form className="expense-form" onSubmit={addDirectExpense}><input value={directDescription} onChange={e => setDirectDescription(e.target.value)} placeholder="What was it for?" required /><div className="amount-input"><span>₹</span><input type="number" min="0.01" step="0.01" value={directAmount} onChange={e => setDirectAmount(e.target.value)} placeholder="0.00" required /></div><select value={directPayer} onChange={e => setDirectPayer(e.target.value)}><option value="me">Paid by me</option><option value="friend">Paid by {activeFriend.displayName}</option></select><button className="primary">Add direct expense</button></form><h3>Expense history</h3>{directExpenses.map(item => <div className="friend-line" key={item.id}><div><strong>{item.description}</strong><small>{dateTime(item.occurredAt)} · Paid by {item.payerId === me.id ? 'you' : activeFriend.displayName}</small></div><strong>{money(item.amountMinor)}</strong></div>)}{!directExpenses.length && <p className="muted">No direct expenses yet.</p>}</> : <div className="empty-state"><strong>Select a friend</strong><p>Choose someone to view or add direct expenses.</p></div>}</div>
+            </div>
+          </>
+        ) : !selected ? (
           <>
             <header className="groups-header">
               <div>
