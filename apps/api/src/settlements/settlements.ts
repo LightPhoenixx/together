@@ -70,9 +70,6 @@ class SettlementsService {
       if (debtOwedByPayer <= 0 || creditOwedToPayee <= 0) {
         throw new BadRequestException('There is no outstanding balance from this payer to this recipient.');
       }
-      if (amountMinor > Math.min(debtOwedByPayer, creditOwedToPayee)) {
-        throw new BadRequestException('Payment is greater than the outstanding amount between these members.');
-      }
       const created = await tx.settlement.create({
         data: {
           groupId, payerId, payeeId, amountMinor: BigInt(amountMinor), currency: group.currency,
