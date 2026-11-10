@@ -2,6 +2,7 @@ import { Body, Controller, Get, Injectable, Param, Post, Req, UseGuards, BadRequ
 import { PrismaService } from '../prisma.service';
 import { AuthGuard } from '../common/auth.guard';
 import { notifyUsers } from '../common/notifications';
+import { notifyUsers } from '../common/notifications';
 
 @Injectable()
 class GroupsService {
@@ -38,6 +39,7 @@ class GroupsService {
       await this.db.auditEvent.create({
         data: { actorId: userId, entityType: 'GROUP', entityId: groupId, action: 'MEMBER_ADDED', afterData: { userId: person.id, displayName: person.displayName } },
       });
+      await notifyUsers(this.db, [person.id], userId, { type: 'GROUP_MEMBER_ADDED', title: 'Added to a group', message: `You were added to ${group.name}.`, groupId, entityType: 'GROUP', entityId: groupId });
     }
     return { added: true, user: { id: person.id, displayName: person.displayName, email: person.email } };
   }
