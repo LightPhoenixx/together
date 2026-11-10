@@ -66,6 +66,8 @@ model User {
   directExpensesCreated DirectExpense[] @relation("DirectExpenseCreator")
   directExpensesPaid DirectExpense[] @relation("DirectExpensePayer")
   directExpensesWith DirectExpense[] @relation("DirectExpenseOtherUser")
+  directSettlementsSent DirectSettlement[] @relation("DirectSettlementPayer")
+  directSettlementsReceived DirectSettlement[] @relation("DirectSettlementPayee")
 }
 
 model Group {
@@ -245,13 +247,32 @@ model DirectExpense {
   otherUserId String
   description String
   amountMinor BigInt
+  createdByShareMinor BigInt?
+  otherUserShareMinor BigInt?
   currency String @default("INR")
   occurredAt DateTime @default(now())
+  deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   createdBy User @relation("DirectExpenseCreator", fields: [createdById], references: [id])
   payer User @relation("DirectExpensePayer", fields: [payerId], references: [id])
   otherUser User @relation("DirectExpenseOtherUser", fields: [otherUserId], references: [id])
-  @@index([payerId, otherUserId, occurredAt])
-  @@index([otherUserId, payerId, occurredAt])
+  @@index([createdById, otherUserId, occurredAt])
+  @@index([otherUserId, createdById, occurredAt])
+}
+
+model DirectSettlement {
+  id String @id @default(cuid())
+  payerId String
+  payeeId String
+  createdById String
+  amountMinor BigInt
+  method SettlementMethod @default(UPI)
+  note String?
+  paidAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  payer User @relation("DirectSettlementPayer", fields: [payerId], references: [id])
+  payee User @relation("DirectSettlementPayee", fields: [payeeId], references: [id])
+  @@index([payerId, payeeId, paidAt])
+  @@index([payeeId, payerId, paidAt])
 }
