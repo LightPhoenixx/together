@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Injectable, NotFoundException, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { AuthGuard } from '../common/auth.guard';
 
@@ -11,7 +12,7 @@ class FriendsService {
   }
   private pairKey(a: string, b: string) { return [a, b].sort().join(':'); }
   private async log(actorId: string, friendId: string, action: string, afterData: Record<string, unknown>) {
-    await this.db.auditEvent.create({ data: { actorId, entityType: 'DIRECT_FRIEND', entityId: this.pairKey(actorId, friendId), action, afterData } });
+    await this.db.auditEvent.create({ data: { actorId, entityType: 'DIRECT_FRIEND', entityId: this.pairKey(actorId, friendId), action, afterData: afterData as Prisma.InputJsonValue } });
   }
   async search(userId: string, q: string) {
     const term = String(q || '').trim(); if (term.length < 2) return [];
