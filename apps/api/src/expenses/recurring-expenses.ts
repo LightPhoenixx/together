@@ -48,8 +48,8 @@ class RecurringExpensesService implements OnModuleInit, OnModuleDestroy {
     if (Number.isNaN(nextRunAt.getTime())) throw new BadRequestException('Enter a valid first due date.');
     const group = await this.db.group.findUnique({ where: { id: groupId }, include: { members: true } });
     if (!group) throw new BadRequestException('Group not found.');
-    const payerIds = Array.isArray(body.payerIds) ? [...new Set(body.payerIds.filter((x: unknown): x is string => typeof x === 'string'))] : [userId];
-    const splitUserIds = Array.isArray(body.splitUserIds) ? [...new Set(body.splitUserIds.filter((x: unknown): x is string => typeof x === 'string'))] : group.members.map(m => m.userId);
+    const payerIds: string[] = Array.isArray(body.payerIds) ? [...new Set<string>(body.payerIds.filter((x: unknown): x is string => typeof x === 'string'))] : [userId];
+    const splitUserIds: string[] = Array.isArray(body.splitUserIds) ? [...new Set<string>(body.splitUserIds.filter((x: unknown): x is string => typeof x === 'string'))] : group.members.map(m => m.userId);
     const memberIds = group.members.map(m => m.userId);
     if (!payerIds.length || !splitUserIds.length || [...payerIds, ...splitUserIds].some(id => !memberIds.includes(id))) throw new BadRequestException('Payers and participants must be group members.');
     const endsAt = body.endsAt ? new Date(body.endsAt) : null;
