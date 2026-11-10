@@ -258,7 +258,7 @@ export default function Home() {
     if (event.action === 'GROUP_CREATED') return 'created this group';
     if (event.action === 'MEMBER_ADDED') return `added ${String(details.displayName || 'a member')} to the group`;
     if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0))})`;
-    if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0))}`;
+    if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0))} from ${String(details.payerName || 'a member')} to ${String(details.payeeName || 'a member')}`;
     return event.action.toLowerCase().replaceAll('_', ' ');
   };
   const dateTime = (value: string) => new Intl.DateTimeFormat('en-IN', {
@@ -455,7 +455,7 @@ export default function Home() {
                 <section className="panel detail-panel">
                   <div className="panel-heading"><div><h2>Record a payment</h2><p className="muted">Log a payment already made between group members.</p></div></div>
                   <form className="settlement-form" onSubmit={addSettlement}>
-                    <label>Paid by<select value={settlementPayer} onChange={e => setSettlementPayer(e.target.value)} required>
+                    <label>Paid by<select value={settlementPayer || me.id} onChange={e => setSettlementPayer(e.target.value)} required>
                       <option value="">Choose member</option>
                       {current?.members.map(m => <option key={m.userId} value={m.userId}>{m.user.displayName}</option>)}
                     </select></label>
