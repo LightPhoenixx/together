@@ -57,21 +57,22 @@ class SettlementsService {
     const paidAt = body.paidAt ? new Date(body.paidAt) : new Date();
     if (Number.isNaN(paidAt.getTime())) throw new BadRequestException('Enter a valid payment date.');
 
-    const [expenses, confirmed] = await Promise.all([
-      this.db.expense.findMany({ where: { groupId, status: 'ACTIVE' }, include: { payers: true, splits: true } }),
-      this.db.settlement.findMany({ where: { groupId, status: 'CONFIRMED' }, select: { payerId: true, payeeId: true, amountMinor: true } }),
-    ]);
-    const net = buildNetBalances(expenses, confirmed);
-    const debtOwedByPayer = Math.max(0, -(net.get(payerId) || 0));
-    const creditOwedToPayee = Math.max(0, net.get(payeeId) || 0);
-    if (debtOwedByPayer <= 0 || creditOwedToPayee <= 0) {
-      throw new BadRequestException('There is no outstanding balance from this payer to this recipient.');
-    }
-    if (amountMinor > Math.min(debtOwedByPayer, creditOwedToPayee)) {
-      throw new BadRequestException('Payment is greater than the outstanding amount between these members.');
-    }
-
     const settlement = await this.db.$transaction(async (tx: any) => {
+      // Re-read the ledger inside a serializable transaction so concurrent
+      // payment submissions cannot both spend the same outstanding balance.
+      const [expenses, confirmed] = await Promise.all([
+        tx.expense.findMany({ where: { groupId, status: 'ACTIVE' }, include: { payers: true, splits: true } }),
+        tx.settlement.findMany({ where: { groupId, status: 'CONFIRMED' }, select: { payerId: true, payeeId: true, amountMinor: true } }),
+      ]);
+      const net = buildNetBalances(expenses, confirmed);
+      const debtOwedByPayer = Math.max(0, -(net.get(payerId) || 0));
+      const creditOwedToPayee = Math.max(0, net.get(payeeId) || 0);
+      if (debtOwedByPayer <= 0 || creditOwedToPayee <= 0) {
+        throw new BadRequestException('There is no outstanding balance from this payer to this recipient.');
+      }
+      if (amountMinor > Math.min(debtOwedByPayer, creditOwedToPayee)) {
+        throw new BadRequestException('Payment is greater than the outstanding amount between these members.');
+      }
       const created = await tx.settlement.create({
         data: {
           groupId, payerId, payeeId, amountMinor: BigInt(amountMinor), currency: group.currency,
@@ -89,7 +90,7 @@ class SettlementsService {
         },
       });
       return created;
-    });
+    }, { isolationLevel: 'Serializable' });
     return { ...settlement, amountMinor: Number(settlement.amountMinor) };
   }
 }
