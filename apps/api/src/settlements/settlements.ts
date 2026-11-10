@@ -85,7 +85,7 @@ class SettlementsService {
       await tx.auditEvent.create({
         data: {
           actorId: userId, entityType: 'GROUP', entityId: groupId, action: 'SETTLEMENT_RECORDED',
-          afterData: { settlementId: created.id, payerId, payeeId, amountMinor, method },
+          afterData: { settlementId: created.id, payerId, payerName: created.payer.displayName, payeeId, payeeName: created.payee.displayName, amountMinor, method },
         },
       });
       return created;
