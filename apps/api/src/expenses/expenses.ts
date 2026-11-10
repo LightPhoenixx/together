@@ -2,6 +2,7 @@ import { Body, Controller, Get, Injectable, Param, Post, Req, UseGuards, BadRequ
 import { PrismaService } from '../prisma.service';
 import { AuthGuard } from '../common/auth.guard';
 import { splitEqually, assertSplitTotal } from '@expense/shared';
+import { buildNetBalances } from '../settlements/ledger';
 
 @Injectable()
 class ExpensesService {
@@ -47,11 +48,11 @@ class ExpensesService {
   async balances(userId: string, groupId: string) {
     const member = await this.db.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } }); if (!member) throw new ForbiddenException();
     const expenses = await this.db.expense.findMany({ where: { groupId, status: 'ACTIVE' }, include: { payers: true, splits: true } });
-    const net = new Map<string, number>();
-    for (const expense of expenses) {
-      for (const p of expense.payers) net.set(p.userId, (net.get(p.userId) || 0) + Number(p.amountMinor));
-      for (const s of expense.splits) net.set(s.userId, (net.get(s.userId) || 0) - Number(s.amountMinor));
-    }
+    const settlements = await this.db.settlement.findMany({
+      where: { groupId, status: 'CONFIRMED' },
+      select: { payerId: true, payeeId: true, amountMinor: true },
+    });
+    const net = buildNetBalances(expenses, settlements);
     const users = await this.db.groupMember.findMany({ where: { groupId }, include: { user: { select: { id: true, displayName: true, email: true } } } });
     return users.map(m => ({ user: m.user, netAmountMinor: net.get(m.userId) || 0 }));
   }
