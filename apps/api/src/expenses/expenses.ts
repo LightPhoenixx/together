@@ -121,8 +121,10 @@ class ExpensesService {
     }
     const start = new Date(date); start.setHours(0, 0, 0, 0);
     const end = new Date(date); end.setHours(23, 59, 59, 999);
+    const group = await this.db.group.findUnique({ where: { id: groupId }, select: { currency: true } });
+    const currency = String(body.currency || group?.currency || 'INR').toUpperCase();
     const rows = await this.db.expense.findMany({
-      where: { groupId, status: 'ACTIVE', amountMinor: BigInt(amountMinor), currency: String(body.currency || (await this.db.group.findUnique({ where: { id: groupId }, select: { currency: true } }))?.currency || 'INR').toUpperCase(), occurredAt: { gte: start, lte: end }, description: { equals: description, mode: 'insensitive' } },
+      where: { groupId, status: 'ACTIVE', amountMinor: BigInt(amountMinor), currency, occurredAt: { gte: start, lte: end }, description: { equals: description, mode: 'insensitive' } },
       select: { id: true, description: true, amountMinor: true, currency: true, occurredAt: true, category: true },
       take: 5,
     });
