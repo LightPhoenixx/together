@@ -60,9 +60,9 @@ class ExpensesService {
         const floor = Math.floor(raw);
         return { userId: row.userId, amountMinor: floor, remainder: raw - floor, index };
       });
-      let remaining = amountBaseMinor - exact.reduce((sum, row) => sum + row.amountMinor, 0);
+      const remaining = amountBaseMinor - exact.reduce((sum, row) => sum + row.amountMinor, 0);
       const priority = [...exact].sort((a, b) => b.remainder - a.remainder || a.index - b.index);
-      for (let i = 0; i < remaining; i++) priority[i].amountMinor += 1;
+      for (let i = 0; i < remaining; i++) { const row = priority[i]; if (row) row.amountMinor += 1; }
       return exact.map(({ userId, amountMinor }) => ({ userId, amountMinor }));
     };
     return {
