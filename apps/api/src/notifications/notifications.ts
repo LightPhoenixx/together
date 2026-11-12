@@ -32,11 +32,13 @@ class NotificationsService {
     const groupId = String(body.groupId || '');
     const recipientId = String(body.recipientId || '');
     if (!groupId || !recipientId || recipientId === userId) throw new BadRequestException('Choose another group member to remind.');
-    const [members, expenses, settlements] = await Promise.all([
+    const [group, members, expenses, settlements] = await Promise.all([
+      this.db.group.findUnique({ where: { id: groupId }, select: { currency: true } }),
       this.db.groupMember.findMany({ where: { groupId }, include: { user: { select: { displayName: true } } } }),
       this.db.expense.findMany({ where: { groupId, status: 'ACTIVE' }, include: { payers: true, splits: true } }),
       this.db.settlement.findMany({ where: { groupId, status: 'CONFIRMED' }, select: { payerId: true, payeeId: true, amountMinor: true } }),
     ]);
+    if (!group) throw new NotFoundException('Group not found.');
     const memberIds = members.map(m => m.userId);
     if (!memberIds.includes(userId) || !memberIds.includes(recipientId)) throw new ForbiddenException('Both people must belong to this group.');
     const net = buildNetBalances(expenses, settlements);
@@ -50,7 +52,7 @@ class NotificationsService {
     await this.db.notification.create({ data: {
       userId: recipientId, actorId: userId, groupId, type: 'SETTLEMENT_REMINDER',
       title: 'Settlement reminder',
-      message: `You have an outstanding balance of ₹${(amount / 100).toFixed(2)} to settle in this group.`,
+      message: `You have an outstanding balance of ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: group.currency }).format(amount / 100)} to settle in this group.`,
       entityType: 'GROUP', entityId: groupId,
     } });
     return { sent: true };
