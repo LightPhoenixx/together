@@ -457,6 +457,24 @@ export default function Home() {
   });
   const totalOwed = Math.max(myNet, 0);
   const totalOwe = Math.max(-myNet, 0);
+  const analytics = useMemo(() => {
+    const total = expenses.reduce((sum, item) => sum + item.amountBaseMinor, 0);
+    const categories = Object.entries(expenses.reduce<Record<string, number>>((acc, item) => {
+      acc[item.category] = (acc[item.category] || 0) + item.amountBaseMinor;
+      return acc;
+    }, {})).sort((a, b) => b[1] - a[1]);
+    const now = new Date();
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      return { key, label: date.toLocaleDateString('en-IN', { month: 'short' }), amount: expenses.filter(item => item.occurredAt.slice(0, 7) === key).reduce((sum, item) => sum + item.amountBaseMinor, 0) };
+    });
+    const payers = Object.entries(expenses.reduce<Record<string, number>>((acc, item) => {
+      item.payers.forEach(payer => { acc[payer.user.displayName] = (acc[payer.user.displayName] || 0) + payer.amountBaseMinor; });
+      return acc;
+    }, {})).sort((a, b) => b[1] - a[1]);
+    return { total, categories, months, payers, maxMonth: Math.max(1, ...months.map(month => month.amount)) };
+  }, [expenses]);
   const activityDescription = (event: ActivityEvent) => {
     const details = event.afterData || {};
     if (event.action === 'GROUP_CREATED') return 'created this group';
@@ -622,6 +640,19 @@ export default function Home() {
             <section className="group-balance-hero">
               <div><span className="hero-label">YOUR NET BALANCE</span><strong>{money(myNet, current?.currency || 'INR')}</strong><p>{myNet > 0 ? 'You are owed money in this group' : myNet < 0 ? 'You owe money in this group' : 'You are all settled up in this group'}</p></div>
               <div className="hero-breakdown"><div><span>You are owed</span><strong className="hero-positive">{money(totalOwed, current?.currency || 'INR')}</strong></div><div><span>You owe</span><strong>{money(totalOwe, current?.currency || 'INR')}</strong></div></div>
+            </section>
+
+            <section className="panel detail-panel" style={{ marginBottom: 24 }}>
+              <div className="panel-heading"><div><h2>Spending insights</h2><p className="muted">A breakdown of active expenses in this group, shown in {current?.currency || 'INR'}.</p></div><span className="count-pill">{expenses.length} expenses</span></div>
+              <div className="insights-summary">
+                <div><span className="muted">Total group spending</span><strong>{money(analytics.total, current?.currency || 'INR')}</strong></div>
+                <div><span className="muted">Average per expense</span><strong>{money(expenses.length ? Math.round(analytics.total / expenses.length) : 0, current?.currency || 'INR')}</strong></div>
+                <div><span className="muted">Top payer</span><strong>{analytics.payers[0]?.[0] || '—'}</strong><small>{analytics.payers.length ? money(analytics.payers[0][1], current?.currency || 'INR') : 'No payments yet'}</small></div>
+              </div>
+              <div className="insights-grid">
+                <div><h3>Last 6 months</h3>{analytics.months.map(month => <div className="insight-bar-row" key={month.key}><span>{month.label}</span><div className="insight-bar-track"><div className="insight-bar-fill" style={{ width: `${month.amount / analytics.maxMonth * 100}%` }} /></div><strong>{money(month.amount, current?.currency || 'INR')}</strong></div>)}</div>
+                <div><h3>By category</h3>{analytics.categories.length ? analytics.categories.map(([category, value]) => <div className="insight-bar-row" key={category}><span>{category.replaceAll('_', ' ')}</span><div className="insight-bar-track"><div className="insight-bar-fill" style={{ width: `${value / Math.max(1, analytics.categories[0][1]) * 100}%` }} /></div><strong>{money(value, current?.currency || 'INR')}</strong></div>) : <p className="muted">Add expenses to see category insights.</p>}</div>
+              </div>
             </section>
 
             <div className="detail-columns">
