@@ -94,3 +94,5 @@
 .notification-row.is-unread { background: rgba(80, 130, 190, 0.06); }
 
 .reminder-button { margin-left: 8px; }
+
+.show-more-activity { margin: 14px 0 2px 30px; }
