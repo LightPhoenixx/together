@@ -20,7 +20,15 @@ class ExpensesService {
   private validateExpense(group: any, body: any, fallbackPayerIds: string[]) {
     const memberIds: string[] = group.members.map((m: any) => m.userId);
     const amountMinor = Number(body.amountMinor);
-    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new BadRequestException('Amount must be a positive number of paise.');
+    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new BadRequestException('Amount must be a positive number of minor currency units.');
+    const currency = String(body.currency || group.currency).toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) throw new BadRequestException('Currency must be a 3-letter ISO code.');
+    const rawRate = currency === group.currency ? 1 : Number(body.exchangeRate);
+    if (!Number.isFinite(rawRate) || rawRate <= 0 || rawRate > 1000000) throw new BadRequestException(`Enter a valid ${group.currency} per 1 ${currency} exchange rate.`);
+    const exchangeRateMicros = Math.round(rawRate * 1000000);
+    if (!Number.isSafeInteger(exchangeRateMicros) || exchangeRateMicros <= 0) throw new BadRequestException('Exchange rate has too many decimal places.');
+    const amountBaseMinor = Math.round(amountMinor * exchangeRateMicros / 1000000);
+    if (!Number.isSafeInteger(amountBaseMinor) || amountBaseMinor <= 0) throw new BadRequestException('Converted amount is outside the supported range.');
     const description = String(body.description ?? '').trim();
     if (!description || description.length > 120) throw new BadRequestException('Description is required and must be at most 120 characters.');
     const category = String(body.category || 'OTHER').toUpperCase();
@@ -45,11 +53,25 @@ class ExpensesService {
     }
     const occurredAt = body.occurredAt ? new Date(body.occurredAt) : new Date();
     if (Number.isNaN(occurredAt.getTime())) throw new BadRequestException('Enter a valid expense date.');
+    const payerAmounts = splitEqually(amountMinor, payerIds);
+    const toBaseRows = (rows: { userId: string; amountMinor: number }[]) => {
+      const exact = rows.map((row, index) => {
+        const raw = row.amountMinor * exchangeRateMicros / 1000000;
+        const floor = Math.floor(raw);
+        return { userId: row.userId, amountMinor: floor, remainder: raw - floor, index };
+      });
+      const remaining = amountBaseMinor - exact.reduce((sum, row) => sum + row.amountMinor, 0);
+      const priority = [...exact].sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+      for (let i = 0; i < remaining; i++) { const row = priority[i]; if (row) row.amountMinor += 1; }
+      return exact.map(({ userId, amountMinor }) => ({ userId, amountMinor }));
+    };
     return {
-      amountMinor, description, category, occurredAt,
+      amountMinor, amountBaseMinor, exchangeRateMicros, currency, description, category, occurredAt,
       notes: typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) || null : null,
-      payerAmounts: splitEqually(amountMinor, payerIds),
+      payerAmounts: payerAmounts,
+      payerBaseAmounts: toBaseRows(payerAmounts),
       splits,
+      baseSplits: toBaseRows(splits),
     };
   }
 
@@ -57,8 +79,11 @@ class ExpensesService {
     return {
       ...expense,
       amountMinor: Number(expense.amountMinor),
-      payers: expense.payers.map((p: any) => ({ ...p, amountMinor: Number(p.amountMinor) })),
-      splits: expense.splits.map((s: any) => ({ ...s, amountMinor: Number(s.amountMinor) })),
+      amountBaseMinor: Number(expense.amountBaseMinor ?? expense.amountMinor),
+      exchangeRate: Number(expense.exchangeRateMicros ?? BigInt(1000000)) / 1000000,
+      exchangeRateMicros: Number(expense.exchangeRateMicros ?? BigInt(1000000)),
+      payers: expense.payers.map((p: any) => ({ ...p, amountMinor: Number(p.amountMinor), amountBaseMinor: Number(p.amountBaseMinor ?? p.amountMinor) })),
+      splits: expense.splits.map((s: any) => ({ ...s, amountMinor: Number(s.amountMinor), amountBaseMinor: Number(s.amountBaseMinor ?? s.amountMinor) })),
     };
   }
 
@@ -70,10 +95,10 @@ class ExpensesService {
     const created = await this.db.expense.create({
       data: {
         groupId, createdById: userId, description: input.description, notes: input.notes,
-        amountMinor: BigInt(input.amountMinor), currency: group.currency, category: input.category,
+        amountMinor: BigInt(input.amountMinor), amountBaseMinor: BigInt(input.amountBaseMinor), exchangeRateMicros: BigInt(input.exchangeRateMicros), currency: input.currency, category: input.category,
         splitMethod: body.splitMethod === 'EXACT' ? 'EXACT' : 'EQUAL', occurredAt: input.occurredAt,
-        payers: { create: input.payerAmounts.map(p => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor) })) },
-        splits: { create: input.splits.map((s: any) => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor) })) },
+        payers: { create: input.payerAmounts.map((p, i) => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor), amountBaseMinor: BigInt(input.payerBaseAmounts[i].amountMinor) })) },
+        splits: { create: input.splits.map((s: any, i: number) => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor), amountBaseMinor: BigInt(input.baseSplits[i].amountMinor) })) },
       },
       include: { payers: { include: { user: { select: { id: true, displayName: true } } } }, splits: { include: { user: { select: { id: true, displayName: true } } } } },
     });
@@ -96,9 +121,11 @@ class ExpensesService {
     }
     const start = new Date(date); start.setHours(0, 0, 0, 0);
     const end = new Date(date); end.setHours(23, 59, 59, 999);
+    const group = await this.db.group.findUnique({ where: { id: groupId }, select: { currency: true } });
+    const currency = String(body.currency || group?.currency || 'INR').toUpperCase();
     const rows = await this.db.expense.findMany({
-      where: { groupId, status: 'ACTIVE', amountMinor: BigInt(amountMinor), occurredAt: { gte: start, lte: end }, description: { equals: description, mode: 'insensitive' } },
-      select: { id: true, description: true, amountMinor: true, occurredAt: true, category: true },
+      where: { groupId, status: 'ACTIVE', amountMinor: BigInt(amountMinor), currency, occurredAt: { gte: start, lte: end }, description: { equals: description, mode: 'insensitive' } },
+      select: { id: true, description: true, amountMinor: true, currency: true, occurredAt: true, category: true },
       take: 5,
     });
     return rows.map(row => ({ ...row, amountMinor: Number(row.amountMinor) }));
@@ -159,16 +186,17 @@ class ExpensesService {
         where: { id: expenseId },
         data: {
           description: input.description, notes: input.notes, amountMinor: BigInt(input.amountMinor),
+          amountBaseMinor: BigInt(input.amountBaseMinor), exchangeRateMicros: BigInt(input.exchangeRateMicros), currency: input.currency,
           category: input.category, occurredAt: input.occurredAt,
           splitMethod: body.splitMethod === 'EXACT' ? 'EXACT' : 'EQUAL',
-          payers: { create: input.payerAmounts.map((p: any) => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor) })) },
-          splits: { create: input.splits.map((s: any) => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor) })) },
+          payers: { create: input.payerAmounts.map((p: any, i: number) => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor), amountBaseMinor: BigInt(input.payerBaseAmounts[i].amountMinor) })) },
+          splits: { create: input.splits.map((s: any, i: number) => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor), amountBaseMinor: BigInt(input.baseSplits[i].amountMinor) })) },
         },
         include: { payers: { include: { user: { select: { id: true, displayName: true } } } }, splits: { include: { user: { select: { id: true, displayName: true } } } } },
       });
       await tx.auditEvent.create({ data: {
         actorId: userId, entityType: 'GROUP', entityId: groupId, action: 'EXPENSE_UPDATED',
-        beforeData: before, afterData: { expenseId, description: row.description, amountMinor: input.amountMinor, category: input.category },
+        beforeData: before, afterData: { expenseId, description: row.description, amountMinor: input.amountMinor, amountBaseMinor: input.amountBaseMinor, currency: input.currency, category: input.category },
       } });
       return row;
     });

@@ -10,12 +10,15 @@ type Expense = {
   description: string;
   category: string;
   amountMinor: number;
+  amountBaseMinor: number;
+  currency: string;
+  exchangeRate: number;
   occurredAt: string;
-  payers: { user: User; amountMinor: number }[];
+  payers: { user: User; amountMinor: number; amountBaseMinor: number }[];
   splits: { user: User; amountMinor: number }[];
 };
 type Balance = { user: User; netAmountMinor: number };
-type DuplicateExpense = { id: string; description: string; amountMinor: number; occurredAt: string };
+type DuplicateExpense = { id: string; description: string; amountMinor: number; currency: string; occurredAt: string };
 type Settlement = { id: string; payerId: string; payeeId: string; amountMinor: number; method: string; status: string; note?: string | null; paidAt?: string | null; createdAt: string; payer: { id: string; displayName: string }; payee: { id: string; displayName: string } };
 type DebtSuggestion = { payer: { id: string; displayName: string }; payee: { id: string; displayName: string }; amountMinor: number };
 type Friend = { id: string; displayName: string; email: string };
@@ -35,8 +38,8 @@ type ActivityEvent = {
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/v1';
-const money = (minor: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(minor / 100);
+const money = (minor: number, currency = 'INR') =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency }).format(minor / 100);
 
 export default function Home() {
   const [token, setToken] = useState('');
@@ -60,6 +63,9 @@ export default function Home() {
   const [settlementMethod, setSettlementMethod] = useState('CASH');
   const [settlementNote, setSettlementNote] = useState('');
   const [groupName, setGroupName] = useState('');
+  const [groupCurrency, setGroupCurrency] = useState('INR');
+  const [expenseCurrency, setExpenseCurrency] = useState('INR');
+  const [expenseExchangeRate, setExpenseExchangeRate] = useState('1');
   const [inviteEmail, setInviteEmail] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
@@ -304,9 +310,9 @@ export default function Home() {
     try {
       await request('/groups', {
         method: 'POST',
-        body: JSON.stringify({ name: groupName, currency: 'INR' }),
+        body: JSON.stringify({ name: groupName, currency: groupCurrency }),
       });
-      setGroupName('');
+      setGroupName(''); setGroupCurrency('INR');
       await refreshGroups();
       // Stay on the overview so the new group appears in the group list.
       setSelected('');
@@ -337,6 +343,7 @@ export default function Home() {
       method: editingExpenseId ? 'PUT' : 'POST', body: JSON.stringify(payload),
     });
     setDescription(''); setAmount(''); setExpenseCategory('OTHER'); setEditingExpenseId('');
+    setExpenseCurrency(current?.currency || 'INR'); setExpenseExchangeRate('1');
     setDuplicateCandidates([]); setPendingExpensePayload(null);
     await refreshSelected(selected); await refreshGroups();
   }
@@ -350,7 +357,8 @@ export default function Home() {
     try {
       const existing = expenses.find((item) => item.id === editingExpenseId);
       const payload = {
-        description, category: expenseCategory, amountMinor: Math.round(rupees * 100),
+        description, category: expenseCategory, amountMinor: Math.round(rupees * 100), currency: expenseCurrency,
+        ...(expenseCurrency !== current?.currency ? { exchangeRate: Number(expenseExchangeRate) } : {}),
         payerIds: existing ? existing.payers.map((p) => p.user.id) : [me?.id],
         splitUserIds: existing ? existing.splits.map((s) => s.user.id) : groups.find((g) => g.id === selected)?.members.map((m) => m.userId),
         splitMethod: 'EQUAL',
@@ -367,8 +375,9 @@ export default function Home() {
     e.preventDefault();
     if (!selected) return;
     try {
-      const amountMinor = Math.round(Number(amount) * 100);
-      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid amount first in the expense form.');
+      const enteredMinor = Math.round(Number(amount) * 100);
+      const amountMinor = expenseCurrency === current?.currency ? enteredMinor : Math.round(enteredMinor * Number(expenseExchangeRate));
+      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid amount and exchange rate first in the expense form.');
       await request(`/groups/${selected}/recurring-expenses`, { method: 'POST', body: JSON.stringify({
         description, amountMinor, category: expenseCategory, frequency: recurrenceFrequency,
         nextRunAt: recurrenceDate ? new Date(`${recurrenceDate}T09:00:00`).toISOString() : new Date().toISOString(),
@@ -383,6 +392,7 @@ export default function Home() {
     setDescription(expense.description);
     setAmount((expense.amountMinor / 100).toFixed(2));
     setExpenseCategory(expense.category || 'OTHER');
+    setExpenseCurrency(expense.currency || current?.currency || 'INR'); setExpenseExchangeRate(String(expense.exchangeRate || 1));
     document.getElementById('add-expense')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
@@ -451,6 +461,7 @@ export default function Home() {
   }
 
   const current = useMemo(() => groups.find((g) => g.id === selected), [groups, selected]);
+  useEffect(() => { if (current && !editingExpenseId) setExpenseCurrency(current.currency || 'INR'); }, [current?.id, current?.currency, editingExpenseId]);
   const myNet = balances.find((b) => b.user.id === me?.id)?.netAmountMinor || 0;
   const visibleExpenses = expenses.filter((expense) => {
     const term = expenseSearch.trim().toLowerCase();
@@ -465,11 +476,11 @@ export default function Home() {
     const details = event.afterData || {};
     if (event.action === 'GROUP_CREATED') return 'created this group';
     if (event.action === 'MEMBER_ADDED') return `added ${String(details.displayName || 'a member')} to the group`;
-    if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0))})`;
+    if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0), String(details.currency || current?.currency || 'INR'))})`;
     if (event.action === 'EXPENSE_UPDATED') return `updated “${String(details.description || 'an expense')}”`;
     if (event.action === 'EXPENSE_DELETED') return `deleted “${String(details.description || event.beforeData?.description || 'an expense')}”`;
     if (event.action === 'EXPENSE_RESTORED') return `restored “${String(details.description || 'an expense')}”`;
-    if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0))} from ${String(details.payerName || 'a member')} to ${String(details.payeeName || 'a member')}`;
+    if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0), current?.currency || 'INR')} from ${String(details.payerName || 'a member')} to ${String(details.payeeName || 'a member')}`;
     return event.action.toLowerCase().replaceAll('_', ' ');
   };
   const dateTime = (value: string) => new Intl.DateTimeFormat('en-IN', {
@@ -606,6 +617,7 @@ export default function Home() {
               <div className="create-copy"><span className="create-plus">＋</span><div><h3>Create a group</h3><p className="muted">Start sharing expenses with friends, family or flatmates.</p></div></div>
               <form className="create-group-form" onSubmit={createGroup}>
                 <input aria-label="New group name" value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="e.g. Bangalore Flat" required />
+                <select aria-label="Group base currency" value={groupCurrency} onChange={e => setGroupCurrency(e.target.value)}><option value="INR">INR — Indian Rupee</option><option value="USD">USD — US Dollar</option><option value="EUR">EUR — Euro</option><option value="GBP">GBP — British Pound</option><option value="AED">AED — UAE Dirham</option><option value="SGD">SGD — Singapore Dollar</option><option value="CAD">CAD — Canadian Dollar</option><option value="AUD">AUD — Australian Dollar</option><option value="JPY">JPY — Japanese Yen</option></select>
                 <button className="primary">Create group <span>→</span></button>
               </form>
             </section>
@@ -623,8 +635,8 @@ export default function Home() {
             </header>
 
             <section className="group-balance-hero">
-              <div><span className="hero-label">YOUR NET BALANCE</span><strong>{money(myNet)}</strong><p>{myNet > 0 ? 'You are owed money in this group' : myNet < 0 ? 'You owe money in this group' : 'You are all settled up in this group'}</p></div>
-              <div className="hero-breakdown"><div><span>You are owed</span><strong className="hero-positive">{money(totalOwed)}</strong></div><div><span>You owe</span><strong>{money(totalOwe)}</strong></div></div>
+              <div><span className="hero-label">YOUR NET BALANCE</span><strong>{money(myNet, current?.currency || 'INR')}</strong><p>{myNet > 0 ? 'You are owed money in this group' : myNet < 0 ? 'You owe money in this group' : 'You are all settled up in this group'}</p></div>
+              <div className="hero-breakdown"><div><span>You are owed</span><strong className="hero-positive">{money(totalOwed, current?.currency || 'INR')}</strong></div><div><span>You owe</span><strong>{money(totalOwe, current?.currency || 'INR')}</strong></div></div>
             </section>
 
             <div className="detail-columns">
@@ -642,9 +654,9 @@ export default function Home() {
                   </div>
                   {visibleExpenses.length ? visibleExpenses.map((expense) => (
                     <div className="detail-expense-row" key={expense.id}>
-                      <div className="expense-symbol">₹</div>
-                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small><small className="expense-date">{dateTime(expense.occurredAt)}</small></div>
-                      <strong className="detail-expense-amount">{money(expense.amountMinor)}</strong>
+                      <div className="expense-symbol">{expense.currency}</div>
+                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small><small className="expense-date">{dateTime(expense.occurredAt)}</small>{expense.currency !== current?.currency && <small>≈ {money(expense.amountBaseMinor, current?.currency || 'INR')} in group currency</small>}</div>
+                      <strong className="detail-expense-amount">{money(expense.amountMinor, expense.currency)}</strong>
                       <div className="expense-actions"><button type="button" onClick={() => editExpense(expense)}>Edit</button><button type="button" onClick={() => deleteExpense(expense)}>Delete</button></div>
                     </div>
                   )) : <div className="empty-state"><strong>{expenses.length ? 'No matching expenses' : 'No expenses yet'}</strong><p>{expenses.length ? 'Try another search or category.' : 'Add the first expense for this group below.'}</p></div>}
@@ -657,7 +669,7 @@ export default function Home() {
                     <div className="detail-expense-row" key={expense.id}>
                       <div className="expense-symbol deleted-symbol">↶</div>
                       <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · {dateTime(expense.occurredAt)}</small></div>
-                      <strong className="detail-expense-amount">{money(expense.amountMinor)}</strong>
+                      <strong className="detail-expense-amount">{money(expense.amountMinor, expense.currency)}</strong>
                       <div className="expense-actions"><button type="button" onClick={() => restoreExpense(expense)}>Restore</button></div>
                     </div>
                   )) : <div className="empty-state"><strong>Nothing deleted</strong><p>Deleted expenses will appear here so you can restore them.</p></div>}
@@ -684,7 +696,9 @@ export default function Home() {
                   <div className="panel-heading"><div><h2>{editingExpenseId ? 'Edit expense' : 'Add an expense'}</h2><p className="muted">Paid by you and split equally among selected group members.</p></div><span className="add-expense-symbol">＋</span></div>
                   <form className="expense-form" onSubmit={addExpense}>
                     <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What was it for? e.g. Groceries" required />
-                    <div className="amount-input"><span>₹</span><input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required /></div>
+                    <div className="amount-input"><span>{expenseCurrency}</span><input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required /></div>
+                    <label>Expense currency<select value={expenseCurrency} onChange={e => setExpenseCurrency(e.target.value)}><option value={current?.currency || 'INR'}>{current?.currency || 'INR'} — group base</option>{['INR','USD','EUR','GBP','AED','SGD','CAD','AUD','JPY'].filter(code => code !== current?.currency).map(code => <option key={code} value={code}>{code}</option>)}</select></label>
+                    {expenseCurrency !== current?.currency && <label>Exchange rate (1 {expenseCurrency} = ? {current?.currency})<input type="number" min="0.000001" step="0.000001" value={expenseExchangeRate} onChange={e => setExpenseExchangeRate(e.target.value)} required /></label>}
                     <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} aria-label="Expense category">
                       {['FOOD','GROCERIES','TRANSPORT','TRAVEL','RENT','UTILITIES','SHOPPING','ENTERTAINMENT','HEALTH','OTHER'].map((category) => <option key={category} value={category}>{category.replaceAll('_',' ')}</option>)}
                     </select>
@@ -697,7 +711,7 @@ export default function Home() {
                   <section className="panel duplicate-warning">
                     <h3>Possible duplicate expense</h3>
                     <p className="muted">A similar expense already exists on this date. You can still add it if this is intentional.</p>
-                    {duplicateCandidates.map(item => <div className="duplicate-row" key={item.id}><strong>{item.description}</strong><span>{money(item.amountMinor)} · {dateTime(item.occurredAt)}</span></div>)}
+                    {duplicateCandidates.map(item => <div className="duplicate-row" key={item.id}><strong>{item.description}</strong><span>{money(item.amountMinor, item.currency)} · {dateTime(item.occurredAt)}</span></div>)}
                     <div className="duplicate-actions">
                       <button className="secondary" type="button" onClick={() => { setDuplicateCandidates([]); setPendingExpensePayload(null); }}>Cancel</button>
                       <button className="primary" type="button" onClick={async () => { try { await submitExpensePayload(pendingExpensePayload); } catch (e) { setError((e as Error).message); } }}>Add anyway</button>
@@ -706,13 +720,13 @@ export default function Home() {
                 )}
 
                 <section className="panel detail-panel">
-                  <div className="panel-heading"><div><h2>Recurring expenses</h2><p className="muted">Automatically add a copy on each scheduled date.</p></div><span className="count-pill">{recurringExpenses.length}</span></div>
+                  <div className="panel-heading"><div><h2>Recurring expenses</h2><p className="muted">Recurring entries use the group base currency ({current?.currency || 'INR'}).</p></div><span className="count-pill">{recurringExpenses.length}</span></div>
                   <form className="settlement-form" onSubmit={createRecurringExpense}>
                     <label>Repeat<select value={recurrenceFrequency} onChange={e => setRecurrenceFrequency(e.target.value)}><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option></select></label>
                     <label>First due date<input type="date" value={recurrenceDate} onChange={e => setRecurrenceDate(e.target.value)} /></label>
                     <button className="secondary" type="submit">Create recurring schedule from expense form</button>
                   </form>
-                  {recurringExpenses.map(rule => <div className="settlement-history-row" key={rule.id}><div><strong>{rule.description}</strong><small>{rule.frequency.toLowerCase()} · Next: {dateTime(rule.nextRunAt)} · {rule.isActive ? 'Active' : 'Paused'}</small></div><strong>{money(rule.amountMinor)}</strong></div>)}
+                  {recurringExpenses.map(rule => <div className="settlement-history-row" key={rule.id}><div><strong>{rule.description}</strong><small>{rule.frequency.toLowerCase()} · Next: {dateTime(rule.nextRunAt)} · {rule.isActive ? 'Active' : 'Paused'}</small></div><strong>{money(rule.amountMinor, current?.currency || 'INR')}</strong></div>)}
                   {!recurringExpenses.length && <p className="muted">No recurring schedules yet. Fill the expense description and amount above, then choose a frequency.</p>}
                 </section>
               </div>
@@ -741,7 +755,7 @@ export default function Home() {
                     <div className="balance-person" key={balance.user.id}>
                       <span>{balance.user.displayName}{balance.user.id === me.id ? ' (you)' : ''}</span>
                       <strong className={balance.netAmountMinor > 0 ? 'green' : balance.netAmountMinor < 0 ? 'red' : ''}>
-                        {balance.netAmountMinor === 0 ? 'Settled' : balance.netAmountMinor > 0 ? `Owed ${money(balance.netAmountMinor)}` : `Owes ${money(-balance.netAmountMinor)}`}
+                        {balance.netAmountMinor === 0 ? 'Settled' : balance.netAmountMinor > 0 ? `Owed ${money(balance.netAmountMinor, current?.currency || 'INR')}` : `Owes ${money(-balance.netAmountMinor, current?.currency || 'INR')}`}
                       </strong>
                       {myNet > 0 && balance.user.id !== me.id && balance.netAmountMinor < 0 && <button className="link-button reminder-button" type="button" onClick={() => sendSettlementReminder(balance.user.id)}>Remind</button>}
                     </div>
@@ -753,7 +767,7 @@ export default function Home() {
                   <div className="panel-heading"><div><h2>Simplify debts</h2><p className="muted">Suggested payments to settle the group.</p></div><span className="count-pill">{suggestions.length}</span></div>
                   {suggestions.length ? suggestions.map((suggestion, index) => (
                     <div className="settlement-suggestion" key={suggestion.payer.id + '-' + suggestion.payee.id + '-' + index}>
-                      <div><strong>{suggestion.payer.displayName}</strong><small> pays </small><strong>{suggestion.payee.displayName}</strong><small className="suggestion-amount">{money(suggestion.amountMinor)}</small></div>
+                      <div><strong>{suggestion.payer.displayName}</strong><small> pays </small><strong>{suggestion.payee.displayName}</strong><small className="suggestion-amount">{money(suggestion.amountMinor, current?.currency || 'INR')}</small></div>
                       <button className="secondary" type="button" onClick={() => useSuggestion(suggestion)}>Record</button>
                     </div>
                   )) : <div className="empty-state"><strong>All settled up</strong><p>No payments are currently suggested.</p></div>}
@@ -770,7 +784,7 @@ export default function Home() {
                       <option value="">Choose member</option>
                       {current?.members.filter(m => m.userId !== (settlementPayer || me.id)).map(m => <option key={m.userId} value={m.userId}>{m.user.displayName}</option>)}
                     </select></label>
-                    <label>Amount (₹)<input type="number" min="0.01" step="0.01" value={settlementAmount} onChange={e => setSettlementAmount(e.target.value)} placeholder="0.00" required /></label>
+                    <label>Amount ({current?.currency || 'INR'})<input type="number" min="0.01" step="0.01" value={settlementAmount} onChange={e => setSettlementAmount(e.target.value)} placeholder="0.00" required /></label>
                     <label>Payment method<select value={settlementMethod} onChange={e => setSettlementMethod(e.target.value)}>
                       <option value="CASH">Cash</option><option value="UPI">UPI</option><option value="BANK_TRANSFER">Bank transfer</option><option value="OTHER">Other</option>
                     </select></label>
@@ -784,7 +798,7 @@ export default function Home() {
                   {settlements.length ? settlements.map(settlement => (
                     <div className="settlement-history-row" key={settlement.id}>
                       <div><strong>{settlement.payer.displayName} → {settlement.payee.displayName}</strong><small>{settlement.method.replaceAll('_', ' ')} · {settlement.status} · {settlement.paidAt ? dateTime(settlement.paidAt) : dateTime(settlement.createdAt)}</small>{settlement.note && <small>{settlement.note}</small>}</div>
-                      <strong>{money(settlement.amountMinor)}</strong>
+                      <strong>{money(settlement.amountMinor, current?.currency || 'INR')}</strong>
                     </div>
                   )) : <div className="empty-state"><strong>No payments recorded</strong><p>Payments will appear here once added.</p></div>}
                 </section>

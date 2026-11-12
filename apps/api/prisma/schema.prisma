@@ -109,6 +109,8 @@ model Expense {
   notes          String?
   category       String        @default("OTHER")
   amountMinor    BigInt
+  amountBaseMinor BigInt @default(0)
+  exchangeRateMicros BigInt @default(1000000)
   currency       String
   splitMethod    SplitMethod
   occurredAt     DateTime
@@ -156,6 +158,7 @@ model ExpensePayer {
   expenseId     String
   userId        String
   amountMinor   BigInt
+  amountBaseMinor BigInt @default(0)
   expense       Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   user          User    @relation(fields: [userId], references: [id])
   @@unique([expenseId, userId])
@@ -166,6 +169,7 @@ model ExpenseSplit {
   expenseId     String
   userId        String
   amountMinor   BigInt
+  amountBaseMinor BigInt @default(0)
   percentageBps Int?
   shareUnits    Int?
   expense       Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)

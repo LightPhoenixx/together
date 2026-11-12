@@ -9,10 +9,12 @@ class GroupsService {
   async list(userId: string) { return this.db.group.findMany({ where: { members: { some: { userId } } }, include: { members: { include: { user: { select: { id: true, displayName: true, email: true } } } }, _count: { select: { expenses: true } } }, orderBy: { updatedAt: 'desc' } }); }
   async create(userId: string, body: any) {
     const name = String(body.name ?? '').trim(); if (name.length < 2) throw new BadRequestException('Group name must contain at least 2 characters.');
+    const currency = String(body.currency || 'INR').toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) throw new BadRequestException('Group currency must be a 3-letter ISO code.');
     const memberIds = [...new Set([userId, ...(Array.isArray(body.memberIds) ? body.memberIds : [])])];
     const users = await this.db.user.findMany({ where: { id: { in: memberIds } }, select: { id: true } });
     if (users.length !== memberIds.length) throw new BadRequestException('One or more members do not exist.');
-    const created = await this.db.group.create({ data: { name, description: body.description || null, currency: body.currency || 'INR', createdById: userId, members: { create: memberIds.map(id => ({ userId: id, role: id === userId ? 'OWNER' : 'MEMBER' })) } }, include: { members: { include: { user: { select: { id: true, displayName: true, email: true } } } } } });
+    const created = await this.db.group.create({ data: { name, description: body.description || null, currency, createdById: userId, members: { create: memberIds.map(id => ({ userId: id, role: id === userId ? 'OWNER' : 'MEMBER' })) } }, include: { members: { include: { user: { select: { id: true, displayName: true, email: true } } } } } });
     await this.db.auditEvent.create({
       data: { actorId: userId, entityType: 'GROUP', entityId: created.id, action: 'GROUP_CREATED', afterData: { name: created.name } },
     });
