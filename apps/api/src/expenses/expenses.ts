@@ -55,9 +55,15 @@ class ExpensesService {
     if (Number.isNaN(occurredAt.getTime())) throw new BadRequestException('Enter a valid expense date.');
     const payerAmounts = splitEqually(amountMinor, payerIds);
     const toBaseRows = (rows: { userId: string; amountMinor: number }[]) => {
-      const converted = rows.map(row => ({ userId: row.userId, amountMinor: Math.round(row.amountMinor * exchangeRateMicros / 1000000) }));
-      if (converted.length) converted[converted.length - 1].amountMinor += amountBaseMinor - converted.reduce((sum, row) => sum + row.amountMinor, 0);
-      return converted;
+      const exact = rows.map((row, index) => {
+        const raw = row.amountMinor * exchangeRateMicros / 1000000;
+        const floor = Math.floor(raw);
+        return { userId: row.userId, amountMinor: floor, remainder: raw - floor, index };
+      });
+      let remaining = amountBaseMinor - exact.reduce((sum, row) => sum + row.amountMinor, 0);
+      const priority = [...exact].sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+      for (let i = 0; i < remaining; i++) priority[i].amountMinor += 1;
+      return exact.map(({ userId, amountMinor }) => ({ userId, amountMinor }));
     };
     return {
       amountMinor, amountBaseMinor, exchangeRateMicros, currency, description, category, occurredAt,
@@ -187,7 +193,7 @@ class ExpensesService {
       });
       await tx.auditEvent.create({ data: {
         actorId: userId, entityType: 'GROUP', entityId: groupId, action: 'EXPENSE_UPDATED',
-        beforeData: before, afterData: { expenseId, description: row.description, amountMinor: input.amountMinor, category: input.category },
+        beforeData: before, afterData: { expenseId, description: row.description, amountMinor: input.amountMinor, amountBaseMinor: input.amountBaseMinor, currency: input.currency, category: input.category },
       } });
       return row;
     });
