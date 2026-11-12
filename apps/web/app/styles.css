@@ -65,3 +65,30 @@
 .friend-expense-form button{align-self:end}
 .danger-text{border:0;background:#fff0ee;color:#b54739;border-radius:7px;padding:8px 12px;font-weight:700;font-size:11px}
 @media(max-width:650px){.friend-expense-form{grid-template-columns:1fr}}
+
+
+/* Milestone 7: notification centre */
+.notification-count {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #d94b4b;
+  color: #fff;
+  font-size: 11px;
+  text-align: center;
+}
+.notification-panel { margin-bottom: 20px; }
+.notification-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 2px;
+  border-top: 1px solid var(--border, #e8e8e8);
+}
+.notification-row p { margin: 5px 0; }
+.notification-row small { color: var(--muted, #777); }
+.notification-row.is-unread { background: rgba(80, 130, 190, 0.06); }
+
+.reminder-button { margin-left: 8px; }

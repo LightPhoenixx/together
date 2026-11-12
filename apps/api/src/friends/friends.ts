@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get,
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { AuthGuard } from '../common/auth.guard';
+import { notifyUsers } from '../common/notifications';
 
 @Injectable()
 class FriendsService {
@@ -37,11 +38,15 @@ class FriendsService {
     if (existing?.status === 'ACCEPTED') throw new BadRequestException('You are already friends.');
     if (existing?.requesterId === target.id) throw new BadRequestException('This person has already sent you a request. Accept it from incoming requests.');
     if (existing) return { id: existing.id, status: existing.status };
-    const row = await this.db.friendship.create({ data: { requesterId: userId, addresseeId: target.id } }); return { id: row.id, status: row.status };
+    const row = await this.db.friendship.create({ data: { requesterId: userId, addresseeId: target.id } });
+    await notifyUsers(this.db, [target.id], userId, { type: 'FRIEND_REQUEST', title: 'New friend request', message: 'Someone sent you a friend request.', entityType: 'FRIENDSHIP', entityId: row.id });
+    return { id: row.id, status: row.status };
   }
   async accept(userId: string, id: string) {
     const row = await this.db.friendship.findFirst({ where: { id, addresseeId: userId, status: 'PENDING' } }); if (!row) throw new NotFoundException('Friend request not found.');
-    return this.db.friendship.update({ where: { id }, data: { status: 'ACCEPTED' } });
+    const updated = await this.db.friendship.update({ where: { id }, data: { status: 'ACCEPTED' } });
+    await notifyUsers(this.db, [row.requesterId], userId, { type: 'FRIEND_REQUEST_ACCEPTED', title: 'Friend request accepted', message: 'Your friend request was accepted.', entityType: 'FRIENDSHIP', entityId: id });
+    return updated;
   }
   async decline(userId: string, id: string) {
     const row = await this.db.friendship.findFirst({ where: { id, addresseeId: userId, status: 'PENDING' } }); if (!row) throw new NotFoundException('Friend request not found.');
@@ -68,6 +73,7 @@ class FriendsService {
     const friendShare = amount - myShare;
     const row = await this.db.directExpense.create({ data: { createdById: userId, otherUserId: friendId, payerId, description, amountMinor: BigInt(amount), createdByShareMinor: BigInt(myShare), otherUserShareMinor: BigInt(friendShare), occurredAt } });
     await this.log(userId, friendId, 'DIRECT_EXPENSE_CREATED', { expenseId: row.id, description, amountMinor: amount, payerId, myShareMinor: myShare, friendShareMinor: friendShare });
+    await notifyUsers(this.db, [friendId], userId, { type: 'DIRECT_EXPENSE_CREATED', title: 'New friend expense', message: `${description} was added to your shared expenses.`, entityType: 'DIRECT_EXPENSE', entityId: row.id });
     return { ...row, amountMinor: amount, createdByShareMinor: myShare, otherUserShareMinor: friendShare };
   }
   async directExpenses(userId: string, friendId: string) {
@@ -87,6 +93,7 @@ class FriendsService {
     const friendShare = amount - myShare;
     const row = await this.db.directExpense.update({ where: { id }, data: { description, amountMinor: BigInt(amount), createdByShareMinor: BigInt(myShare), otherUserShareMinor: BigInt(friendShare), payerId, occurredAt } });
     await this.log(userId, friendId, 'DIRECT_EXPENSE_UPDATED', { expenseId: id, description, amountMinor: amount, payerId, myShareMinor: myShare, friendShareMinor: friendShare });
+    await notifyUsers(this.db, [friendId], userId, { type: 'DIRECT_EXPENSE_UPDATED', title: 'Friend expense updated', message: `${description} was updated.`, entityType: 'DIRECT_EXPENSE', entityId: id });
     return { ...row, amountMinor: amount, createdByShareMinor: myShare, otherUserShareMinor: friendShare };
   }
   async deleteDirectExpense(userId: string, friendId: string, id: string) {
@@ -94,7 +101,9 @@ class FriendsService {
     if (old.createdById !== userId) throw new ForbiddenException('Only the person who added this expense can delete it.');
     if (old.deletedAt) throw new BadRequestException('This expense is already deleted.');
     await this.db.directExpense.update({ where: { id }, data: { deletedAt: new Date() } });
-    await this.log(userId, friendId, 'DIRECT_EXPENSE_DELETED', { expenseId: id, description: old.description, amountMinor: Number(old.amountMinor) }); return { deleted: true };
+    await this.log(userId, friendId, 'DIRECT_EXPENSE_DELETED', { expenseId: id, description: old.description, amountMinor: Number(old.amountMinor) });
+    await notifyUsers(this.db, [friendId], userId, { type: 'DIRECT_EXPENSE_DELETED', title: 'Friend expense deleted', message: `${old.description} was deleted.`, entityType: 'DIRECT_EXPENSE', entityId: id });
+    return { deleted: true };
   }
   async addSettlement(userId: string, friendId: string, body: any) {
     await this.acceptedFriend(userId, friendId);
@@ -105,6 +114,7 @@ class FriendsService {
     if (!payerId || !Number.isSafeInteger(amount) || amount <= 0 || Number.isNaN(paidAt.getTime())) throw new BadRequestException('Enter a valid payer, amount and payment date.');
     const row = await this.db.directSettlement.create({ data: { payerId, payeeId, createdById: userId, amountMinor: BigInt(amount), method, note: String(body.note || '').trim() || null, paidAt } });
     await this.log(userId, friendId, 'DIRECT_SETTLEMENT_RECORDED', { settlementId: row.id, payerId, payeeId, amountMinor: amount, method });
+    await notifyUsers(this.db, [friendId], userId, { type: 'DIRECT_SETTLEMENT_RECORDED', title: 'Friend payment recorded', message: 'A payment was recorded in your shared expenses.', entityType: 'DIRECT_SETTLEMENT', entityId: row.id });
     return { ...row, amountMinor: amount };
   }
   async settlements(userId: string, friendId: string) {
