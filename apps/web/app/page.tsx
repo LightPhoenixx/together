@@ -56,6 +56,8 @@ export default function Home() {
   const [balances, setBalances] = useState<Balance[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [showAllActivity, setShowAllActivity] = useState(false);
+  const [showAllExpenses, setShowAllExpenses] = useState(false);
+  const [showAllDeletedExpenses, setShowAllDeletedExpenses] = useState(false);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [suggestions, setSuggestions] = useState<DebtSuggestion[]>([]);
   const [settlementPayer, setSettlementPayer] = useState('');
@@ -143,6 +145,8 @@ export default function Home() {
     setBalances(balanceData);
     setActivity(activityData);
     setShowAllActivity(false);
+    setShowAllExpenses(false);
+    setShowAllDeletedExpenses(false);
     setSettlements(settlementData);
     setSuggestions(suggestionData);
   }, [request]);
@@ -648,7 +652,7 @@ export default function Home() {
                     <input type="date" aria-label="From date" value={expenseFromDate} onChange={(e) => setExpenseFromDate(e.target.value)} />
                     <input type="date" aria-label="To date" value={expenseToDate} onChange={(e) => setExpenseToDate(e.target.value)} />
                   </div>
-                  {visibleExpenses.length ? visibleExpenses.map((expense) => (
+                  {visibleExpenses.length ? visibleExpenses.slice(0, showAllExpenses ? visibleExpenses.length : 5).map((expense) => (
                     <div className="detail-expense-row" key={expense.id}>
                       <div className="expense-symbol">{expense.currency}</div>
                       <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small><small className="expense-date">{dateTime(expense.occurredAt)}</small>{expense.currency !== current?.currency && <small>≈ {money(expense.amountBaseMinor, current?.currency || 'INR')} in group currency</small>}</div>
@@ -656,12 +660,13 @@ export default function Home() {
                       <div className="expense-actions"><button type="button" onClick={() => editExpense(expense)}>Edit</button><button type="button" onClick={() => deleteExpense(expense)}>Delete</button></div>
                     </div>
                   )) : <div className="empty-state"><strong>{expenses.length ? 'No matching expenses' : 'No expenses yet'}</strong><p>{expenses.length ? 'Try another search or category.' : 'Add the first expense for this group below.'}</p></div>}
+                  {visibleExpenses.length > 5 && <button className="secondary show-more-activity" type="button" onClick={() => setShowAllExpenses(value => !value)}>{showAllExpenses ? 'Show less' : `Show more (${visibleExpenses.length - 5})`}</button>}
                 </section>
 
 
                 <section className="panel detail-panel recently-deleted-panel">
                   <div className="panel-heading"><div><h2>Recently deleted</h2><p className="muted">Restore an expense to include it in group balances again.</p></div><span className="count-pill">{deletedExpenses.length}</span></div>
-                  {deletedExpenses.length ? deletedExpenses.map((expense) => (
+                  {deletedExpenses.length ? deletedExpenses.slice(0, showAllDeletedExpenses ? deletedExpenses.length : 5).map((expense) => (
                     <div className="detail-expense-row" key={expense.id}>
                       <div className="expense-symbol deleted-symbol">↶</div>
                       <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · {dateTime(expense.occurredAt)}</small></div>
@@ -669,6 +674,7 @@ export default function Home() {
                       <div className="expense-actions"><button type="button" onClick={() => restoreExpense(expense)}>Restore</button></div>
                     </div>
                   )) : <div className="empty-state"><strong>Nothing deleted</strong><p>Deleted expenses will appear here so you can restore them.</p></div>}
+                  {deletedExpenses.length > 5 && <button className="secondary show-more-activity" type="button" onClick={() => setShowAllDeletedExpenses(value => !value)}>{showAllDeletedExpenses ? 'Show less' : `Show more (${deletedExpenses.length - 5})`}</button>}
                 </section>
 
                 <section className="panel detail-panel activity-panel">
