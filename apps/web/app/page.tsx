@@ -18,7 +18,7 @@ type Expense = {
   splits: { user: User; amountMinor: number }[];
 };
 type Balance = { user: User; netAmountMinor: number };
-type DuplicateExpense = { id: string; description: string; amountMinor: number; occurredAt: string };
+type DuplicateExpense = { id: string; description: string; amountMinor: number; currency: string; occurredAt: string };
 type Settlement = { id: string; payerId: string; payeeId: string; amountMinor: number; method: string; status: string; note?: string | null; paidAt?: string | null; createdAt: string; payer: { id: string; displayName: string }; payee: { id: string; displayName: string } };
 type DebtSuggestion = { payer: { id: string; displayName: string }; payee: { id: string; displayName: string }; amountMinor: number };
 type Friend = { id: string; displayName: string; email: string };
@@ -375,8 +375,9 @@ export default function Home() {
     e.preventDefault();
     if (!selected) return;
     try {
-      const amountMinor = Math.round(Number(amount) * 100);
-      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid amount first in the expense form.');
+      const enteredMinor = Math.round(Number(amount) * 100);
+      const amountMinor = expenseCurrency === current?.currency ? enteredMinor : Math.round(enteredMinor * Number(expenseExchangeRate));
+      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid amount and exchange rate first in the expense form.');
       await request(`/groups/${selected}/recurring-expenses`, { method: 'POST', body: JSON.stringify({
         description, amountMinor, category: expenseCategory, frequency: recurrenceFrequency,
         nextRunAt: recurrenceDate ? new Date(`${recurrenceDate}T09:00:00`).toISOString() : new Date().toISOString(),
@@ -475,7 +476,7 @@ export default function Home() {
     const details = event.afterData || {};
     if (event.action === 'GROUP_CREATED') return 'created this group';
     if (event.action === 'MEMBER_ADDED') return `added ${String(details.displayName || 'a member')} to the group`;
-    if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0))})`;
+    if (event.action === 'EXPENSE_CREATED') return `added “${String(details.description || 'an expense')}” (${money(Number(details.amountMinor || 0), String(details.currency || current?.currency || 'INR'))})`;
     if (event.action === 'EXPENSE_UPDATED') return `updated “${String(details.description || 'an expense')}”`;
     if (event.action === 'EXPENSE_DELETED') return `deleted “${String(details.description || event.beforeData?.description || 'an expense')}”`;
     if (event.action === 'EXPENSE_RESTORED') return `restored “${String(details.description || 'an expense')}”`;
@@ -710,7 +711,7 @@ export default function Home() {
                   <section className="panel duplicate-warning">
                     <h3>Possible duplicate expense</h3>
                     <p className="muted">A similar expense already exists on this date. You can still add it if this is intentional.</p>
-                    {duplicateCandidates.map(item => <div className="duplicate-row" key={item.id}><strong>{item.description}</strong><span>{money(item.amountMinor)} · {dateTime(item.occurredAt)}</span></div>)}
+                    {duplicateCandidates.map(item => <div className="duplicate-row" key={item.id}><strong>{item.description}</strong><span>{money(item.amountMinor, item.currency)} · {dateTime(item.occurredAt)}</span></div>)}
                     <div className="duplicate-actions">
                       <button className="secondary" type="button" onClick={() => { setDuplicateCandidates([]); setPendingExpensePayload(null); }}>Cancel</button>
                       <button className="primary" type="button" onClick={async () => { try { await submitExpensePayload(pendingExpensePayload); } catch (e) { setError((e as Error).message); } }}>Add anyway</button>
@@ -719,7 +720,7 @@ export default function Home() {
                 )}
 
                 <section className="panel detail-panel">
-                  <div className="panel-heading"><div><h2>Recurring expenses</h2><p className="muted">Automatically add a copy on each scheduled date.</p></div><span className="count-pill">{recurringExpenses.length}</span></div>
+                  <div className="panel-heading"><div><h2>Recurring expenses</h2><p className="muted">Recurring entries use the group base currency ({current?.currency || 'INR'}).</p></div><span className="count-pill">{recurringExpenses.length}</span></div>
                   <form className="settlement-form" onSubmit={createRecurringExpense}>
                     <label>Repeat<select value={recurrenceFrequency} onChange={e => setRecurrenceFrequency(e.target.value)}><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option></select></label>
                     <label>First due date<input type="date" value={recurrenceDate} onChange={e => setRecurrenceDate(e.target.value)} /></label>
