@@ -86,10 +86,10 @@ class RecurringExpensesService implements OnModuleInit, OnModuleDestroy {
             await this.db.$transaction(async tx => {
               await tx.expense.create({ data: {
                 groupId: rule.groupId, createdById: rule.createdById, description: rule.description, notes: rule.notes,
-                category: rule.category, amountMinor: rule.amountMinor, currency: rule.currency, splitMethod: 'EQUAL',
+                category: rule.category, amountMinor: rule.amountMinor, amountBaseMinor: rule.amountMinor, exchangeRateMicros: BigInt(1000000), currency: rule.currency, splitMethod: 'EQUAL',
                 occurredAt: occurrence, recurringExpenseId: rule.id, recurrenceDate: occurrence,
-                payers: { create: payers.map(p => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor) })) },
-                splits: { create: splits.map(s => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor) })) },
+                payers: { create: payers.map(p => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor), amountBaseMinor: BigInt(p.amountMinor) })) },
+                splits: { create: splits.map(s => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor), amountBaseMinor: BigInt(s.amountMinor) })) },
               } });
               await tx.auditEvent.create({ data: { actorId: rule.createdById, entityType: 'GROUP', entityId: rule.groupId, action: 'RECURRING_EXPENSE_GENERATED', afterData: { recurringExpenseId: rule.id, description: rule.description, amountMinor: Number(rule.amountMinor), occurrence: occurrence.toISOString() } } });
             });
