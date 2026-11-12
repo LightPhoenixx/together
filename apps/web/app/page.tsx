@@ -72,6 +72,9 @@ export default function Home() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
+  const [splitMethod, setSplitMethod] = useState<'EQUAL' | 'EXACT' | 'PERCENTAGE' | 'SHARES'>('EQUAL');
+  const [splitValues, setSplitValues] = useState<Record<string, string>>({});
+  const [payerValues, setPayerValues] = useState<Record<string, string>>({});
   const [expenseCategory, setExpenseCategory] = useState('OTHER');
   const [editingExpenseId, setEditingExpenseId] = useState('');
   const [expenseSearch, setExpenseSearch] = useState('');
@@ -357,12 +360,24 @@ export default function Home() {
     setError('');
     try {
       const existing = expenses.find((item) => item.id === editingExpenseId);
+      const memberIds = current?.members.map(member => member.userId) || [];
+      const amountMinor = Math.round(rupees * 100);
+      const enteredPayers = Object.entries(payerValues).filter(([, value]) => value.trim() !== '');
+      const payerRows = enteredPayers.map(([userId, value]) => ({ userId, amountMinor: Math.round(Number(value) * 100) }));
+      const splitRows = splitMethod === 'EQUAL' ? undefined : memberIds.map(userId => {
+        const value = Number(splitValues[userId] || 0);
+        if (splitMethod === 'EXACT') return { userId, amountMinor: Math.round(value * 100) };
+        if (splitMethod === 'PERCENTAGE') return { userId, percentage: value };
+        return { userId, shareUnits: value };
+      });
       const payload = {
-        description, category: expenseCategory, amountMinor: Math.round(rupees * 100), currency: expenseCurrency,
+        description, category: expenseCategory, amountMinor, currency: expenseCurrency,
         ...(expenseCurrency !== current?.currency ? { exchangeRate: Number(expenseExchangeRate) } : {}),
-        payerIds: existing ? existing.payers.map((p) => p.user.id) : [me?.id],
-        splitUserIds: existing ? existing.splits.map((s) => s.user.id) : groups.find((g) => g.id === selected)?.members.map((m) => m.userId),
-        splitMethod: 'EQUAL',
+        payerIds: payerRows.length ? payerRows.filter(row => row.amountMinor > 0).map(row => row.userId) : [me?.id],
+        ...(payerRows.length ? { payers: payerRows.filter(row => row.amountMinor > 0) } : {}),
+        splitUserIds: memberIds,
+        splitMethod,
+        ...(splitRows ? { splits: splitRows } : {}),
       };
       if (!editingExpenseId) {
         const duplicates = await request(`/groups/${selected}/expenses/duplicate-check`, { method: 'POST', body: JSON.stringify(payload) });
@@ -667,6 +682,15 @@ export default function Home() {
                     <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} aria-label="Expense category">
                       {['FOOD','GROCERIES','TRANSPORT','TRAVEL','RENT','UTILITIES','SHOPPING','ENTERTAINMENT','HEALTH','OTHER'].map((category) => <option key={category} value={category}>{category.replaceAll('_',' ')}</option>)}
                     </select>
+                    <label>Split method<select value={splitMethod} onChange={e => setSplitMethod(e.target.value as typeof splitMethod)}>
+                      <option value="EQUAL">Equally</option><option value="EXACT">Exact amounts</option><option value="PERCENTAGE">By percentage</option><option value="SHARES">By shares</option>
+                    </select></label>
+                    {splitMethod !== 'EQUAL' && <div className="flexible-split-editor"><strong>Each member's {splitMethod === 'EXACT' ? 'amount' : splitMethod === 'PERCENTAGE' ? 'percentage' : 'share units'}</strong>
+                      {current?.members.map(member => <label key={member.userId}>{member.user.displayName}<input type="number" min="0" step={splitMethod === 'SHARES' ? '1' : '0.01'} value={splitValues[member.userId] || ''} onChange={e => setSplitValues(values => ({ ...values, [member.userId]: e.target.value }))} placeholder={splitMethod === 'PERCENTAGE' ? '0%' : splitMethod === 'SHARES' ? '0 shares' : '0.00'} /></label>)}
+                    </div>}
+                    <details className="payer-contributions"><summary>Advanced: split payment between multiple payers</summary><p className="muted">Enter how much each person paid. Leave blank to use you as the only payer.</p>
+                      {current?.members.map(member => <label key={member.userId}>{member.user.displayName}<input type="number" min="0" step="0.01" value={payerValues[member.userId] || ''} onChange={e => setPayerValues(values => ({ ...values, [member.userId]: e.target.value }))} placeholder="0.00" /></label>)}
+                    </details>
                     <button className="primary" disabled={!current}>{editingExpenseId ? 'Save changes' : 'Save expense'}</button>
                     {editingExpenseId && <button className="secondary" type="button" onClick={() => { setEditingExpenseId(''); setDescription(''); setAmount(''); setExpenseCategory('OTHER'); }}>Cancel edit</button>}
                   </form>

@@ -110,3 +110,10 @@
 .insight-bar-track{height:9px;background:#edf1ed;border-radius:10px;overflow:hidden}
 .insight-bar-fill{height:100%;min-width:0;background:var(--green);border-radius:10px}
 @media(max-width:760px){.insights-summary{grid-template-columns:1fr}.insights-grid{grid-template-columns:1fr}}
+
+
+.flexible-split-editor,.payer-contributions{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--pale)}
+.flexible-split-editor>label,.payer-contributions>label{display:grid;grid-template-columns:minmax(100px,1fr) minmax(110px,1fr);align-items:center;gap:12px;color:var(--muted);font-size:13px}
+.flexible-split-editor input,.payer-contributions input{width:100%;min-width:0}
+.payer-contributions summary{cursor:pointer;font-weight:700}
+.payer-contributions p{margin:0}

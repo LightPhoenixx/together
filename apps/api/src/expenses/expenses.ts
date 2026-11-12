@@ -44,12 +44,44 @@ class ExpensesService {
     if (!payerIds.length || !splitIds.length || [...payerIds, ...splitIds].some(id => !memberIds.includes(id))) {
       throw new BadRequestException('Payers and participants must be group members.');
     }
-    const splits = Array.isArray(body.splits) && body.splits.length
-      ? body.splits.map((s: any) => ({ userId: String(s.userId), amountMinor: Number(s.amountMinor) }))
-      : splitEqually(amountMinor, splitIds);
+    const splitMethod = String(body.splitMethod || 'EQUAL').toUpperCase();
+    if (!['EQUAL', 'EXACT', 'PERCENTAGE', 'SHARES'].includes(splitMethod)) throw new BadRequestException('Choose a valid split method.');
+    let splits: { userId: string; amountMinor: number; percentageBps?: number | null; shareUnits?: number | null }[];
+    if (splitMethod === 'EQUAL') {
+      splits = splitEqually(amountMinor, splitIds);
+    } else if (splitMethod === 'EXACT') {
+      if (!Array.isArray(body.splits)) throw new BadRequestException('Enter an exact amount for each participant.');
+      splits = body.splits.map((s: any) => ({ userId: String(s.userId), amountMinor: Number(s.amountMinor) }));
+    } else if (splitMethod === 'PERCENTAGE') {
+      if (!Array.isArray(body.splits)) throw new BadRequestException('Enter a percentage for each participant.');
+      const rows = body.splits.map((s: any) => ({ userId: String(s.userId), value: Number(s.percentage) }));
+      if (rows.some(row => !Number.isFinite(row.value) || row.value < 0 || row.value > 100) || Math.round(rows.reduce((sum, row) => sum + row.value, 0) * 100) !== 10000) {
+        throw new BadRequestException('Participant percentages must add up to exactly 100%.');
+      }
+      const raw = rows.map((row, index) => ({ ...row, index, exact: amountMinor * row.value / 100, amountMinor: Math.floor(amountMinor * row.value / 100) }));
+      let remainder = amountMinor - raw.reduce((sum, row) => sum + row.amountMinor, 0);
+      [...raw].sort((x, y) => (y.exact - y.amountMinor) - (x.exact - x.amountMinor) || x.index - y.index).slice(0, remainder).forEach(row => { raw[row.index].amountMinor += 1; });
+      splits = raw.map(row => ({ userId: row.userId, amountMinor: row.amountMinor, percentageBps: Math.round(row.value * 100) }));
+    } else {
+      if (!Array.isArray(body.splits)) throw new BadRequestException('Enter share units for each participant.');
+      const rows = body.splits.map((s: any) => ({ userId: String(s.userId), units: Number(s.shareUnits) }));
+      if (rows.some(row => !Number.isSafeInteger(row.units) || row.units < 0) || rows.reduce((sum, row) => sum + row.units, 0) <= 0) throw new BadRequestException('Share units must be non-negative integers and at least one share is required.');
+      const totalUnits = rows.reduce((sum, row) => sum + row.units, 0);
+      const raw = rows.map((row, index) => ({ ...row, index, exact: amountMinor * row.units / totalUnits, amountMinor: Math.floor(amountMinor * row.units / totalUnits) }));
+      const remainder = amountMinor - raw.reduce((sum, row) => sum + row.amountMinor, 0);
+      [...raw].sort((x, y) => (y.exact - y.amountMinor) - (x.exact - x.amountMinor) || x.index - y.index).slice(0, remainder).forEach(row => { raw[row.index].amountMinor += 1; });
+      splits = raw.map(row => ({ userId: row.userId, amountMinor: row.amountMinor, shareUnits: row.units }));
+    }
     try { assertSplitTotal(amountMinor, splits); } catch (e) { throw new BadRequestException((e as Error).message); }
-    if (splits.some((s: any) => !splitIds.includes(s.userId) || !Number.isSafeInteger(s.amountMinor) || s.amountMinor < 0)) {
-      throw new BadRequestException('Invalid split values.');
+    if (splits.length !== splitIds.length || new Set(splits.map(s => s.userId)).size !== splitIds.length || splits.some((s: any) => !splitIds.includes(s.userId) || !Number.isSafeInteger(s.amountMinor) || s.amountMinor < 0)) {
+      throw new BadRequestException('Provide exactly one valid split for each selected participant.');
+    }
+    const rawPayers = Array.isArray(body.payers) ? body.payers : null;
+    const payerAmounts = rawPayers
+      ? rawPayers.map((p: any) => ({ userId: String(p.userId), amountMinor: Number(p.amountMinor) }))
+      : splitEqually(amountMinor, payerIds);
+    if (payerAmounts.length !== payerIds.length || new Set(payerAmounts.map((p: any) => p.userId)).size !== payerIds.length || payerAmounts.some((p: any) => !payerIds.includes(p.userId) || !Number.isSafeInteger(p.amountMinor) || p.amountMinor < 0) || payerAmounts.reduce((sum: number, p: any) => sum + p.amountMinor, 0) !== amountMinor) {
+      throw new BadRequestException('Payer contributions must be valid and add up to the expense total.');
     }
     const occurredAt = body.occurredAt ? new Date(body.occurredAt) : new Date();
     if (Number.isNaN(occurredAt.getTime())) throw new BadRequestException('Enter a valid expense date.');
@@ -66,7 +98,7 @@ class ExpensesService {
       return exact.map(({ userId, amountMinor }) => ({ userId, amountMinor }));
     };
     return {
-      amountMinor, amountBaseMinor, exchangeRateMicros, currency, description, category, occurredAt,
+      amountMinor, amountBaseMinor, exchangeRateMicros, currency, description, category, occurredAt, splitMethod,
       notes: typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) || null : null,
       payerAmounts: payerAmounts,
       payerBaseAmounts: toBaseRows(payerAmounts),
@@ -96,9 +128,9 @@ class ExpensesService {
       data: {
         groupId, createdById: userId, description: input.description, notes: input.notes,
         amountMinor: BigInt(input.amountMinor), amountBaseMinor: BigInt(input.amountBaseMinor), exchangeRateMicros: BigInt(input.exchangeRateMicros), currency: input.currency, category: input.category,
-        splitMethod: body.splitMethod === 'EXACT' ? 'EXACT' : 'EQUAL', occurredAt: input.occurredAt,
+        splitMethod: input.splitMethod, occurredAt: input.occurredAt,
         payers: { create: input.payerAmounts.map((p, i) => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor), amountBaseMinor: BigInt(input.payerBaseAmounts[i].amountMinor) })) },
-        splits: { create: input.splits.map((s: any, i: number) => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor), amountBaseMinor: BigInt(input.baseSplits[i].amountMinor) })) },
+        splits: { create: input.splits.map((s: any, i: number) => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor), amountBaseMinor: BigInt(input.baseSplits[i].amountMinor), percentageBps: s.percentageBps ?? null, shareUnits: s.shareUnits ?? null })) },
       },
       include: { payers: { include: { user: { select: { id: true, displayName: true } } } }, splits: { include: { user: { select: { id: true, displayName: true } } } } },
     });
@@ -188,7 +220,7 @@ class ExpensesService {
           description: input.description, notes: input.notes, amountMinor: BigInt(input.amountMinor),
           amountBaseMinor: BigInt(input.amountBaseMinor), exchangeRateMicros: BigInt(input.exchangeRateMicros), currency: input.currency,
           category: input.category, occurredAt: input.occurredAt,
-          splitMethod: body.splitMethod === 'EXACT' ? 'EXACT' : 'EQUAL',
+          splitMethod: input.splitMethod,
           payers: { create: input.payerAmounts.map((p: any, i: number) => ({ userId: p.userId, amountMinor: BigInt(p.amountMinor), amountBaseMinor: BigInt(input.payerBaseAmounts[i].amountMinor) })) },
           splits: { create: input.splits.map((s: any, i: number) => ({ userId: s.userId, amountMinor: BigInt(s.amountMinor), amountBaseMinor: BigInt(input.baseSplits[i].amountMinor) })) },
         },
