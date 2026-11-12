@@ -30,6 +30,15 @@ Cross-platform monorepo: Next.js web, Expo mobile, NestJS API, shared TypeScript
 
 The API runs at http://localhost:4000/v1; health check: http://localhost:4000/v1/health.
 
+
+## Multi-currency support (Milestone 9)
+- Each group has a base currency selected when the group is created.
+- Group expenses can be entered in a different currency using a manually supplied exchange rate.
+- The exchange rate and converted base-currency amounts are stored with the expense, so later rate changes do not rewrite historical balances.
+- Group balances, debt simplification, settlements, reminders and recurring expenses use the group's base currency.
+- The first web UI offers INR, USD, EUR, GBP, AED, SGD, CAD, AUD and JPY.
+- Direct friend-to-friend expenses remain INR-only in this milestone; mobile currency UI and automatic live exchange-rate feeds are not included yet.
+
 ## Important current limitations
 - This is a development MVP, not production-ready. Before public deployment add email verification, password reset, rate limiting, stronger DTO validation, refresh-token/session management, invite links, audit events on every mutation, automated tests, secure CORS configuration and a proper secrets manager.
 - Users can currently be added to groups by email only after they have registered.
