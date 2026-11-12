@@ -1,6 +1,6 @@
 export type LedgerExpense = {
-  payers: { userId: string; amountMinor: bigint }[];
-  splits: { userId: string; amountMinor: bigint }[];
+  payers: { userId: string; amountMinor: bigint; amountBaseMinor?: bigint }[];
+  splits: { userId: string; amountMinor: bigint; amountBaseMinor?: bigint }[];
 };
 export type LedgerSettlement = {
   payerId: string;
@@ -11,8 +11,8 @@ export type LedgerSettlement = {
 export function buildNetBalances(expenses: LedgerExpense[], settlements: LedgerSettlement[]) {
   const net = new Map<string, number>();
   for (const expense of expenses) {
-    for (const payer of expense.payers) net.set(payer.userId, (net.get(payer.userId) || 0) + Number(payer.amountMinor));
-    for (const split of expense.splits) net.set(split.userId, (net.get(split.userId) || 0) - Number(split.amountMinor));
+    for (const payer of expense.payers) net.set(payer.userId, (net.get(payer.userId) || 0) + Number(payer.amountBaseMinor ?? payer.amountMinor));
+    for (const split of expense.splits) net.set(split.userId, (net.get(split.userId) || 0) - Number(split.amountBaseMinor ?? split.amountMinor));
   }
   for (const settlement of settlements) {
     const amount = Number(settlement.amountMinor);
