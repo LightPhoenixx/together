@@ -28,6 +28,7 @@ class ExpensesService {
     const exchangeRateMicros = Math.round(rawRate * 1000000);
     if (!Number.isSafeInteger(exchangeRateMicros) || exchangeRateMicros <= 0) throw new BadRequestException('Exchange rate has too many decimal places.');
     const amountBaseMinor = Math.round(amountMinor * exchangeRateMicros / 1000000);
+    if (!Number.isSafeInteger(amountBaseMinor) || amountBaseMinor <= 0) throw new BadRequestException('Converted amount is outside the supported range.');
     const description = String(body.description ?? '').trim();
     if (!description || description.length > 120) throw new BadRequestException('Description is required and must be at most 120 characters.');
     const category = String(body.category || 'OTHER').toUpperCase();
@@ -114,7 +115,7 @@ class ExpensesService {
     const start = new Date(date); start.setHours(0, 0, 0, 0);
     const end = new Date(date); end.setHours(23, 59, 59, 999);
     const rows = await this.db.expense.findMany({
-      where: { groupId, status: 'ACTIVE', amountMinor: BigInt(amountMinor), occurredAt: { gte: start, lte: end }, description: { equals: description, mode: 'insensitive' } },
+      where: { groupId, status: 'ACTIVE', amountMinor: BigInt(amountMinor), currency: String(body.currency || (await this.db.group.findUnique({ where: { id: groupId }, select: { currency: true } }))?.currency || 'INR').toUpperCase(), occurredAt: { gte: start, lte: end }, description: { equals: description, mode: 'insensitive' } },
       select: { id: true, description: true, amountMinor: true, occurredAt: true, category: true },
       take: 5,
     });
