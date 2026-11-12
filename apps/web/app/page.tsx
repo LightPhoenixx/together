@@ -55,6 +55,7 @@ export default function Home() {
   const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [showAllActivity, setShowAllActivity] = useState(false);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [suggestions, setSuggestions] = useState<DebtSuggestion[]>([]);
   const [settlementPayer, setSettlementPayer] = useState('');
@@ -77,9 +78,6 @@ export default function Home() {
   const [expenseToDate, setExpenseToDate] = useState('');
   const [duplicateCandidates, setDuplicateCandidates] = useState<DuplicateExpense[]>([]);
   const [pendingExpensePayload, setPendingExpensePayload] = useState<any>(null);
-  const [recurringExpenses, setRecurringExpenses] = useState<any[]>([]);
-  const [recurrenceFrequency, setRecurrenceFrequency] = useState('MONTHLY');
-  const [recurrenceDate, setRecurrenceDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -144,10 +142,9 @@ export default function Home() {
     setDeletedExpenses(deletedExpenseData);
     setBalances(balanceData);
     setActivity(activityData);
+    setShowAllActivity(false);
     setSettlements(settlementData);
     setSuggestions(suggestionData);
-    const recurringData = await request(`/groups/${id}/recurring-expenses`);
-    setRecurringExpenses(recurringData);
   }, [request]);
 
   useEffect(() => {
@@ -368,22 +365,6 @@ export default function Home() {
         if (duplicates.length) { setDuplicateCandidates(duplicates); setPendingExpensePayload(payload); return; }
       }
       await submitExpensePayload(payload);
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function createRecurringExpense(e: FormEvent) {
-    e.preventDefault();
-    if (!selected) return;
-    try {
-      const enteredMinor = Math.round(Number(amount) * 100);
-      const amountMinor = expenseCurrency === current?.currency ? enteredMinor : Math.round(enteredMinor * Number(expenseExchangeRate));
-      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Enter a valid amount and exchange rate first in the expense form.');
-      await request(`/groups/${selected}/recurring-expenses`, { method: 'POST', body: JSON.stringify({
-        description, amountMinor, category: expenseCategory, frequency: recurrenceFrequency,
-        nextRunAt: recurrenceDate ? new Date(`${recurrenceDate}T09:00:00`).toISOString() : new Date().toISOString(),
-      }) });
-      await refreshSelected(selected);
-      setError('');
     } catch (e) { setError((e as Error).message); }
   }
 
@@ -641,6 +622,21 @@ export default function Home() {
 
             <div className="detail-columns">
               <div className="detail-primary-column">
+                <section className="panel detail-panel" id="add-expense">
+                  <div className="panel-heading"><div><h2>{editingExpenseId ? 'Edit expense' : 'Add an expense'}</h2><p className="muted">Paid by you and split equally among selected group members.</p></div><span className="add-expense-symbol">＋</span></div>
+                  <form className="expense-form" onSubmit={addExpense}>
+                    <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What was it for? e.g. Groceries" required />
+                    <div className="amount-input"><span>{expenseCurrency}</span><input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required /></div>
+                    <label>Expense currency<select value={expenseCurrency} onChange={e => setExpenseCurrency(e.target.value)}><option value={current?.currency || 'INR'}>{current?.currency || 'INR'} — group base</option>{['INR','USD','EUR','GBP','AED','SGD','CAD','AUD','JPY'].filter(code => code !== current?.currency).map(code => <option key={code} value={code}>{code}</option>)}</select></label>
+                    {expenseCurrency !== current?.currency && <label>Exchange rate (1 {expenseCurrency} = ? {current?.currency})<input type="number" min="0.000001" step="0.000001" value={expenseExchangeRate} onChange={e => setExpenseExchangeRate(e.target.value)} required /></label>}
+                    <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} aria-label="Expense category">
+                      {['FOOD','GROCERIES','TRANSPORT','TRAVEL','RENT','UTILITIES','SHOPPING','ENTERTAINMENT','HEALTH','OTHER'].map((category) => <option key={category} value={category}>{category.replaceAll('_',' ')}</option>)}
+                    </select>
+                    <button className="primary" disabled={!current}>{editingExpenseId ? 'Save changes' : 'Save expense'}</button>
+                    {editingExpenseId && <button className="secondary" type="button" onClick={() => { setEditingExpenseId(''); setDescription(''); setAmount(''); setExpenseCategory('OTHER'); }}>Cancel edit</button>}
+                  </form>
+                </section>
+
                 <section className="panel detail-panel">
                   <div className="panel-heading"><div><h2>Expenses</h2><p className="muted">Search, filter, edit or remove group expenses.</p></div><span className="count-pill">{visibleExpenses.length} / {expenses.length}</span></div>
                   <div className="expense-filters">
@@ -679,7 +675,7 @@ export default function Home() {
                   <div className="panel-heading"><div><h2>Group activity</h2><p className="muted">Recent changes in this group.</p></div><span className="count-pill">{activity.length}</span></div>
                   {activity.length ? (
                     <div className="activity-list">
-                      {activity.map((event) => (
+                      {activity.slice(0, showAllActivity ? activity.length : 5).map((event) => (
                         <div className="activity-row" key={event.id}>
                           <span className="activity-dot" />
                           <div className="activity-copy">
@@ -688,24 +684,11 @@ export default function Home() {
                           </div>
                         </div>
                       ))}
+                      {activity.length > 5 && <button className="secondary show-more-activity" type="button" onClick={() => setShowAllActivity(value => !value)}>{showAllActivity ? 'Show less' : `Show more (${activity.length - 5})`}</button>}
                     </div>
                   ) : <div className="empty-state"><strong>No activity yet</strong><p>Group changes will appear here.</p></div>}
                 </section>
 
-                <section className="panel detail-panel" id="add-expense">
-                  <div className="panel-heading"><div><h2>{editingExpenseId ? 'Edit expense' : 'Add an expense'}</h2><p className="muted">Paid by you and split equally among selected group members.</p></div><span className="add-expense-symbol">＋</span></div>
-                  <form className="expense-form" onSubmit={addExpense}>
-                    <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What was it for? e.g. Groceries" required />
-                    <div className="amount-input"><span>{expenseCurrency}</span><input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required /></div>
-                    <label>Expense currency<select value={expenseCurrency} onChange={e => setExpenseCurrency(e.target.value)}><option value={current?.currency || 'INR'}>{current?.currency || 'INR'} — group base</option>{['INR','USD','EUR','GBP','AED','SGD','CAD','AUD','JPY'].filter(code => code !== current?.currency).map(code => <option key={code} value={code}>{code}</option>)}</select></label>
-                    {expenseCurrency !== current?.currency && <label>Exchange rate (1 {expenseCurrency} = ? {current?.currency})<input type="number" min="0.000001" step="0.000001" value={expenseExchangeRate} onChange={e => setExpenseExchangeRate(e.target.value)} required /></label>}
-                    <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} aria-label="Expense category">
-                      {['FOOD','GROCERIES','TRANSPORT','TRAVEL','RENT','UTILITIES','SHOPPING','ENTERTAINMENT','HEALTH','OTHER'].map((category) => <option key={category} value={category}>{category.replaceAll('_',' ')}</option>)}
-                    </select>
-                    <button className="primary" disabled={!current}>{editingExpenseId ? 'Save changes' : 'Save expense'}</button>
-                    {editingExpenseId && <button className="secondary" type="button" onClick={() => { setEditingExpenseId(''); setDescription(''); setAmount(''); setExpenseCategory('OTHER'); }}>Cancel edit</button>}
-                  </form>
-                </section>
 
                 {duplicateCandidates.length > 0 && (
                   <section className="panel duplicate-warning">
@@ -719,16 +702,6 @@ export default function Home() {
                   </section>
                 )}
 
-                <section className="panel detail-panel">
-                  <div className="panel-heading"><div><h2>Recurring expenses</h2><p className="muted">Recurring entries use the group base currency ({current?.currency || 'INR'}).</p></div><span className="count-pill">{recurringExpenses.length}</span></div>
-                  <form className="settlement-form" onSubmit={createRecurringExpense}>
-                    <label>Repeat<select value={recurrenceFrequency} onChange={e => setRecurrenceFrequency(e.target.value)}><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option></select></label>
-                    <label>First due date<input type="date" value={recurrenceDate} onChange={e => setRecurrenceDate(e.target.value)} /></label>
-                    <button className="secondary" type="submit">Create recurring schedule from expense form</button>
-                  </form>
-                  {recurringExpenses.map(rule => <div className="settlement-history-row" key={rule.id}><div><strong>{rule.description}</strong><small>{rule.frequency.toLowerCase()} · Next: {dateTime(rule.nextRunAt)} · {rule.isActive ? 'Active' : 'Paused'}</small></div><strong>{money(rule.amountMinor, current?.currency || 'INR')}</strong></div>)}
-                  {!recurringExpenses.length && <p className="muted">No recurring schedules yet. Fill the expense description and amount above, then choose a frequency.</p>}
-                </section>
               </div>
 
               <aside className="detail-side-column">
