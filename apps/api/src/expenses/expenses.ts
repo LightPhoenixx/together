@@ -81,6 +81,7 @@ class ExpensesService {
       amountMinor: Number(expense.amountMinor),
       amountBaseMinor: Number(expense.amountBaseMinor ?? expense.amountMinor),
       exchangeRate: Number(expense.exchangeRateMicros ?? BigInt(1000000)) / 1000000,
+      exchangeRateMicros: Number(expense.exchangeRateMicros ?? BigInt(1000000)),
       payers: expense.payers.map((p: any) => ({ ...p, amountMinor: Number(p.amountMinor), amountBaseMinor: Number(p.amountBaseMinor ?? p.amountMinor) })),
       splits: expense.splits.map((s: any) => ({ ...s, amountMinor: Number(s.amountMinor), amountBaseMinor: Number(s.amountBaseMinor ?? s.amountMinor) })),
     };
