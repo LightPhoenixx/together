@@ -96,3 +96,17 @@
 .reminder-button { margin-left: 8px; }
 
 .show-more-activity { margin: 14px 0 2px 30px; }
+
+
+.insights-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0 24px}
+.insights-summary>div{display:grid;gap:7px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--pale)}
+.insights-summary strong{font:800 21px Manrope,sans-serif;overflow-wrap:anywhere}
+.insights-summary small{color:var(--muted)}
+.insights-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
+.insights-grid h3{font:700 15px Manrope,sans-serif;margin:0 0 14px}
+.insight-bar-row{display:grid;grid-template-columns:minmax(65px,100px) minmax(35px,1fr) auto;gap:10px;align-items:center;margin:12px 0;font-size:12px}
+.insight-bar-row>span{color:var(--muted);overflow-wrap:anywhere}
+.insight-bar-row strong{font-size:11px;white-space:nowrap}
+.insight-bar-track{height:9px;background:#edf1ed;border-radius:10px;overflow:hidden}
+.insight-bar-fill{height:100%;min-width:0;background:var(--green);border-radius:10px}
+@media(max-width:760px){.insights-summary{grid-template-columns:1fr}.insights-grid{grid-template-columns:1fr}}
