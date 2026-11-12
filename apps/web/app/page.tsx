@@ -480,7 +480,7 @@ export default function Home() {
     if (event.action === 'EXPENSE_UPDATED') return `updated “${String(details.description || 'an expense')}”`;
     if (event.action === 'EXPENSE_DELETED') return `deleted “${String(details.description || event.beforeData?.description || 'an expense')}”`;
     if (event.action === 'EXPENSE_RESTORED') return `restored “${String(details.description || 'an expense')}”`;
-    if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0))} from ${String(details.payerName || 'a member')} to ${String(details.payeeName || 'a member')}`;
+    if (event.action === 'SETTLEMENT_RECORDED') return `recorded a payment of ${money(Number(details.amountMinor || 0), current?.currency || 'INR')} from ${String(details.payerName || 'a member')} to ${String(details.payeeName || 'a member')}`;
     return event.action.toLowerCase().replaceAll('_', ' ');
   };
   const dateTime = (value: string) => new Intl.DateTimeFormat('en-IN', {
@@ -655,7 +655,7 @@ export default function Home() {
                   {visibleExpenses.length ? visibleExpenses.map((expense) => (
                     <div className="detail-expense-row" key={expense.id}>
                       <div className="expense-symbol">{expense.currency}</div>
-                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small><small className="expense-date">{dateTime(expense.occurredAt)}</small></div>
+                      <div className="detail-expense-copy"><strong>{expense.description}</strong><small>{expense.category.replaceAll('_',' ')} · Paid by {expense.payers.map((payer) => payer.user.displayName).join(', ')}</small><small className="expense-date">{dateTime(expense.occurredAt)}</small>{expense.currency !== current?.currency && <small>≈ {money(expense.amountBaseMinor, current?.currency || 'INR')} in group currency</small>}</div>
                       <strong className="detail-expense-amount">{money(expense.amountMinor, expense.currency)}</strong>
                       <div className="expense-actions"><button type="button" onClick={() => editExpense(expense)}>Edit</button><button type="button" onClick={() => deleteExpense(expense)}>Delete</button></div>
                     </div>
