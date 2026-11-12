@@ -6,10 +6,9 @@ import { GroupsController, groupsProviders } from './groups/groups';
 import { ExpensesController, BalancesController, expensesProviders } from './expenses/expenses';
 import { UsersController, usersProviders } from './users/users';
 import { SettlementsController, settlementsProviders } from './settlements/settlements';
-import { RecurringExpensesController, recurringExpensesProviders } from './expenses/recurring-expenses';
 import { FriendsController, friendsProviders } from './friends/friends';
 import { NotificationsController, notificationsProviders } from './notifications/notifications';
 
 @Controller('health') class HealthController { @Get() getHealth() { return { status: 'ok', service: 'together-api', version: '0.2.0' }; } }
-@Module({ imports: [JwtModule.register({ secret: process.env.JWT_SECRET || 'local-dev-only-change-me', signOptions: { expiresIn: '7d' } })], controllers: [HealthController, AuthController, GroupsController, ExpensesController, BalancesController, SettlementsController, RecurringExpensesController, FriendsController, NotificationsController, UsersController], providers: [PrismaService, ...authProviders, ...groupsProviders, ...expensesProviders, ...settlementsProviders, ...recurringExpensesProviders, ...friendsProviders, ...notificationsProviders, ...usersProviders] })
+@Module({ imports: [JwtModule.register({ secret: process.env.JWT_SECRET || 'local-dev-only-change-me', signOptions: { expiresIn: '7d' } })], controllers: [HealthController, AuthController, GroupsController, ExpensesController, BalancesController, SettlementsController, FriendsController, NotificationsController, UsersController], providers: [PrismaService, ...authProviders, ...groupsProviders, ...expensesProviders, ...settlementsProviders, ...friendsProviders, ...notificationsProviders, ...usersProviders] })
 export class AppModule {}
