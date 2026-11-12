@@ -4,6 +4,7 @@ import { AuthGuard } from '../common/auth.guard';
 import { notifyUsers } from '../common/notifications';
 import { splitEqually, assertSplitTotal } from '@expense/shared';
 import { buildNetBalances } from '../settlements/ledger';
+import { SplitMethod as PrismaSplitMethod } from '@prisma/client';
 
 const categories = ['FOOD', 'GROCERIES', 'TRANSPORT', 'TRAVEL', 'RENT', 'UTILITIES', 'SHOPPING', 'ENTERTAINMENT', 'HEALTH', 'OTHER'] as const;
 
@@ -44,8 +45,9 @@ class ExpensesService {
     if (!payerIds.length || !splitIds.length || [...payerIds, ...splitIds].some(id => !memberIds.includes(id))) {
       throw new BadRequestException('Payers and participants must be group members.');
     }
-    const splitMethod = String(body.splitMethod || 'EQUAL').toUpperCase();
-    if (!['EQUAL', 'EXACT', 'PERCENTAGE', 'SHARES'].includes(splitMethod)) throw new BadRequestException('Choose a valid split method.');
+    const rawSplitMethod = String(body.splitMethod || 'EQUAL').toUpperCase();
+    if (!['EQUAL', 'EXACT', 'PERCENTAGE', 'SHARES'].includes(rawSplitMethod)) throw new BadRequestException('Choose a valid split method.');
+    const splitMethod = rawSplitMethod as PrismaSplitMethod;
     let splits: { userId: string; amountMinor: number; percentageBps?: number | null; shareUnits?: number | null }[];
     if (splitMethod === 'EQUAL') {
       splits = splitEqually(amountMinor, splitIds);
@@ -54,7 +56,7 @@ class ExpensesService {
       splits = body.splits.map((s: any) => ({ userId: String(s.userId), amountMinor: Number(s.amountMinor) }));
     } else if (splitMethod === 'PERCENTAGE') {
       if (!Array.isArray(body.splits)) throw new BadRequestException('Enter a percentage for each participant.');
-      const rows = body.splits.map((s: any) => ({ userId: String(s.userId), value: Number(s.percentage) }));
+      const rows: { userId: string; value: number }[] = body.splits.map((s: any) => ({ userId: String(s.userId), value: Number(s.percentage) }));
       if (rows.some(row => !Number.isFinite(row.value) || row.value < 0 || row.value > 100) || Math.round(rows.reduce((sum, row) => sum + row.value, 0) * 100) !== 10000) {
         throw new BadRequestException('Participant percentages must add up to exactly 100%.');
       }
@@ -64,7 +66,7 @@ class ExpensesService {
       splits = raw.map(row => ({ userId: row.userId, amountMinor: row.amountMinor, percentageBps: Math.round(row.value * 100) }));
     } else {
       if (!Array.isArray(body.splits)) throw new BadRequestException('Enter share units for each participant.');
-      const rows = body.splits.map((s: any) => ({ userId: String(s.userId), units: Number(s.shareUnits) }));
+      const rows: { userId: string; units: number }[] = body.splits.map((s: any) => ({ userId: String(s.userId), units: Number(s.shareUnits) }));
       if (rows.some(row => !Number.isSafeInteger(row.units) || row.units < 0) || rows.reduce((sum, row) => sum + row.units, 0) <= 0) throw new BadRequestException('Share units must be non-negative integers and at least one share is required.');
       const totalUnits = rows.reduce((sum, row) => sum + row.units, 0);
       const raw = rows.map((row, index) => ({ ...row, index, exact: amountMinor * row.units / totalUnits, amountMinor: Math.floor(amountMinor * row.units / totalUnits) }));
@@ -77,7 +79,7 @@ class ExpensesService {
       throw new BadRequestException('Provide exactly one valid split for each selected participant.');
     }
     const rawPayers = Array.isArray(body.payers) ? body.payers : null;
-    const payerAmounts = rawPayers
+    const payerAmounts: { userId: string; amountMinor: number }[] = rawPayers
       ? rawPayers.map((p: any) => ({ userId: String(p.userId), amountMinor: Number(p.amountMinor) }))
       : splitEqually(amountMinor, payerIds);
     if (payerAmounts.length !== payerIds.length || new Set(payerAmounts.map((p: any) => p.userId)).size !== payerIds.length || payerAmounts.some((p: any) => !payerIds.includes(p.userId) || !Number.isSafeInteger(p.amountMinor) || p.amountMinor < 0) || payerAmounts.reduce((sum: number, p: any) => sum + p.amountMinor, 0) !== amountMinor) {
@@ -85,7 +87,6 @@ class ExpensesService {
     }
     const occurredAt = body.occurredAt ? new Date(body.occurredAt) : new Date();
     if (Number.isNaN(occurredAt.getTime())) throw new BadRequestException('Enter a valid expense date.');
-    const payerAmounts = splitEqually(amountMinor, payerIds);
     const toBaseRows = (rows: { userId: string; amountMinor: number }[]) => {
       const exact = rows.map((row, index) => {
         const raw = row.amountMinor * exchangeRateMicros / 1000000;
