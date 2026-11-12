@@ -27,7 +27,6 @@ class GroupsService {
       where: { entityType: 'GROUP', entityId: groupId },
       include: { actor: { select: { id: true, displayName: true } } },
       orderBy: { createdAt: 'desc' },
-      take: 50,
     });
   }
   async addMember(userId: string, groupId: string, email: string) {
